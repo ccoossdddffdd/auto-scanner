@@ -9,7 +9,7 @@
     - [x] Sub-task: Implement `main.rs` to parse args and initialize logger - bb6d63c
 - [x] Task: Conductor - User Manual Verification 'Phase 1: Project Initialization & CLI' (Protocol in workflow.md) - c8896f6
 
-## Phase 2: CSV Parsing Module
+## Phase 2: CSV Parsing Module [checkpoint: 3728f54]
 - [x] Task: Define Account Model - c00b33a
     - [x] Sub-task: Create `models` module and define `Account` struct - c00b33a
     - [x] Sub-task: Add `serde` dependency for serialization - c00b33a
@@ -17,7 +17,7 @@
     - [x] Sub-task: Add `csv` dependency - c00b33a
     - [x] Sub-task: Implement function to read CSV and deserialize into `Vec<Account>` - c00b33a
     - [x] Sub-task: Add unit tests for CSV parsing logic - c00b33a
-- [ ] Task: Conductor - User Manual Verification 'Phase 2: CSV Parsing Module' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 2: CSV Parsing Module' (Protocol in workflow.md) - 3728f54
 
 ## Phase 3: Database & Storage Layer
 - [ ] Task: Setup `sqlx` and SQLite
