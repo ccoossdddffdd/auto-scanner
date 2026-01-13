@@ -28,10 +28,10 @@
     - [x] Sub-task: Implement database connection and automated migration execution on startup - 4f83c26
 - [x] Task: Conductor - User Manual Verification 'Phase 3: Database & Storage Layer' (Protocol in workflow.md) - fa0fe42
 
-## Phase 4: Integration
+## Phase 4: Integration [checkpoint: 07e59c4]
 - [x] Task: Wire everything together in `main.rs` - 2c847b3
     - [x] Sub-task: Call CSV reader - 2c847b3
     - [x] Sub-task: Call DB init - 2c847b3
     - [x] Sub-task: (Temporary) Insert read accounts into DB to verify flow - 2c847b3
-- [ ] Task: Conductor - User Manual Verification 'Phase 4: Integration' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 4: Integration' (Protocol in workflow.md) - 07e59c4
 
