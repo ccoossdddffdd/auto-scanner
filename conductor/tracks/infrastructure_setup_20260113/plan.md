@@ -2,8 +2,8 @@
 
 ## Phase 1: Project Initialization & CLI
 - [~] Task: Initialize Rust project
-    - [ ] Sub-task: Run `cargo init`
-    - [ ] Sub-task: Add dependencies (`clap`, `tokio`, `tracing`, `tracing-subscriber`, `anyhow`) to `Cargo.toml`
+    - [x] Sub-task: Run `cargo init`
+    - [x] Sub-task: Add dependencies (`clap`, `tokio`, `tracing`, `tracing-subscriber`, `anyhow`) to `Cargo.toml` - bb6d63c
 - [ ] Task: Implement CLI with `clap`
     - [ ] Sub-task: Define CLI struct with input path argument
     - [ ] Sub-task: Implement `main.rs` to parse args and initialize logger
