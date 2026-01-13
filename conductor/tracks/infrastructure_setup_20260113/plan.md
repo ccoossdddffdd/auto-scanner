@@ -1,12 +1,12 @@
 # Implementation Plan - Infrastructure Setup
 
 ## Phase 1: Project Initialization & CLI
-- [~] Task: Initialize Rust project
+- [x] Task: Initialize Rust project - bb6d63c
     - [x] Sub-task: Run `cargo init`
     - [x] Sub-task: Add dependencies (`clap`, `tokio`, `tracing`, `tracing-subscriber`, `anyhow`) to `Cargo.toml` - bb6d63c
-- [ ] Task: Implement CLI with `clap`
-    - [ ] Sub-task: Define CLI struct with input path argument
-    - [ ] Sub-task: Implement `main.rs` to parse args and initialize logger
+- [x] Task: Implement CLI with `clap` - bb6d63c
+    - [x] Sub-task: Define CLI struct with input path argument - bb6d63c
+    - [x] Sub-task: Implement `main.rs` to parse args and initialize logger - bb6d63c
 - [ ] Task: Conductor - User Manual Verification 'Phase 1: Project Initialization & CLI' (Protocol in workflow.md)
 
 ## Phase 2: CSV Parsing Module
