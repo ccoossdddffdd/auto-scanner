@@ -1,7 +1,7 @@
 # Implementation Plan - Infrastructure Setup
 
 ## Phase 1: Project Initialization & CLI
-- [ ] Task: Initialize Rust project
+- [~] Task: Initialize Rust project
     - [ ] Sub-task: Run `cargo init`
     - [ ] Sub-task: Add dependencies (`clap`, `tokio`, `tracing`, `tracing-subscriber`, `anyhow`) to `Cargo.toml`
 - [ ] Task: Implement CLI with `clap`
