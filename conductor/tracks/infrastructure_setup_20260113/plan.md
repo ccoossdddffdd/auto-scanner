@@ -29,9 +29,9 @@
 - [x] Task: Conductor - User Manual Verification 'Phase 3: Database & Storage Layer' (Protocol in workflow.md) - fa0fe42
 
 ## Phase 4: Integration
-- [ ] Task: Wire everything together in `main.rs`
-    - [ ] Sub-task: Call CSV reader
-    - [ ] Sub-task: Call DB init
-    - [ ] Sub-task: (Temporary) Insert read accounts into DB to verify flow
+- [x] Task: Wire everything together in `main.rs` - 2c847b3
+    - [x] Sub-task: Call CSV reader - 2c847b3
+    - [x] Sub-task: Call DB init - 2c847b3
+    - [x] Sub-task: (Temporary) Insert read accounts into DB to verify flow - 2c847b3
 - [ ] Task: Conductor - User Manual Verification 'Phase 4: Integration' (Protocol in workflow.md)
 
