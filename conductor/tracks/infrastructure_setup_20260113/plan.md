@@ -10,13 +10,13 @@
 - [x] Task: Conductor - User Manual Verification 'Phase 1: Project Initialization & CLI' (Protocol in workflow.md) - c8896f6
 
 ## Phase 2: CSV Parsing Module
-- [ ] Task: Define Account Model
-    - [ ] Sub-task: Create `models` module and define `Account` struct
-    - [ ] Sub-task: Add `serde` dependency for serialization
-- [ ] Task: Implement CSV Reader
-    - [ ] Sub-task: Add `csv` dependency
-    - [ ] Sub-task: Implement function to read CSV and deserialize into `Vec<Account>`
-    - [ ] Sub-task: Add unit tests for CSV parsing logic
+- [x] Task: Define Account Model - c00b33a
+    - [x] Sub-task: Create `models` module and define `Account` struct - c00b33a
+    - [x] Sub-task: Add `serde` dependency for serialization - c00b33a
+- [x] Task: Implement CSV Reader - c00b33a
+    - [x] Sub-task: Add `csv` dependency - c00b33a
+    - [x] Sub-task: Implement function to read CSV and deserialize into `Vec<Account>` - c00b33a
+    - [x] Sub-task: Add unit tests for CSV parsing logic - c00b33a
 - [ ] Task: Conductor - User Manual Verification 'Phase 2: CSV Parsing Module' (Protocol in workflow.md)
 
 ## Phase 3: Database & Storage Layer
