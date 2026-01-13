@@ -19,14 +19,14 @@
     - [x] Sub-task: Add unit tests for CSV parsing logic - c00b33a
 - [x] Task: Conductor - User Manual Verification 'Phase 2: CSV Parsing Module' (Protocol in workflow.md) - 3728f54
 
-## Phase 3: Database & Storage Layer
+## Phase 3: Database & Storage Layer [checkpoint: fa0fe42]
 - [x] Task: Setup `sqlx` and SQLite - 4f83c26
     - [x] Sub-task: Add `sqlx` (with `sqlite`, `runtime-tokio`) dependency - 4f83c26
     - [x] Sub-task: Install `sqlx-cli` (optional, or rely on runtime migration) - 4f83c26
 - [x] Task: Database Initialization Logic - 4f83c26
     - [x] Sub-task: Write SQL migration script for `accounts` table - 4f83c26
     - [x] Sub-task: Implement database connection and automated migration execution on startup - 4f83c26
-- [ ] Task: Conductor - User Manual Verification 'Phase 3: Database & Storage Layer' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 3: Database & Storage Layer' (Protocol in workflow.md) - fa0fe42
 
 ## Phase 4: Integration
 - [ ] Task: Wire everything together in `main.rs`
