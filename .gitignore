@@ -2,7 +2,8 @@
 /incoming_csvs
 /screenshot
 /logs
-
+/.trae
+/.cloudbase
 
 auto-scanner.db
 auto-scanner.db*

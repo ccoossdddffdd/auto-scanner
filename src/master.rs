@@ -3,7 +3,6 @@ use crate::csv_reader::read_accounts_from_csv;
 use crate::database::Database;
 use anyhow::{Context, Result};
 use chrono::Local;
-use daemonize::Daemonize;
 use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
@@ -33,37 +32,14 @@ pub async fn run(
         return stop_master();
     }
 
-    if daemon {
-        let stdout = File::create("logs/auto-scanner.out").context("Failed to create stdout file")?;
-        let stderr = File::create("logs/auto-scanner.err").context("Failed to create stderr file")?;
-
-        let daemonize = Daemonize::new()
-            .pid_file(PID_FILE) // Use daemonize to handle PID file creation
-            .chown_pid_file(true)
-            .working_directory(".")
-            .stdout(stdout)
-            .stderr(stderr);
-
-        match daemonize.start() {
-            Ok(_) => {
-                // We are now in the daemon process
-            }
-            Err(e) => {
-                eprintln!("Error, {}", e);
-                anyhow::bail!("Failed to daemonize: {}", e);
-            }
-        }
-    }
-
-    // Initialize logging AFTER daemonization
+    // Initialize logging
     // If not daemon, we still want stdout logging. If daemon, stdout is redirected to file.
     let file_appender = tracing_appender::rolling::daily("logs", "auto-scanner.log");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
     tracing_subscriber::registry()
         .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .with(tracing_subscriber::fmt::layer().with_writer(std::io::stdout))
         .with(
@@ -74,13 +50,13 @@ pub async fn run(
         .init();
 
     let input_dir = input_dir.expect("Input directory is required unless --stop is specified");
-    
+
     info!(
         "Master started. Monitoring directory: {}, Threads: {}, Screenshots: {}, Backend: {}, Daemon: {}",
         input_dir, thread_count, enable_screenshot, backend, daemon
     );
 
-    // If NOT in daemon mode, we handle PID file manually. 
+    // If NOT in daemon mode, we handle PID file manually.
     // Daemonize crate handles it automatically if configured.
     if !daemon {
         // Write PID file
@@ -88,14 +64,14 @@ pub async fn run(
         if Path::new(PID_FILE).exists() {
             // Check if process is actually running
             if let Ok(content) = fs::read_to_string(PID_FILE) {
-                 if let Ok(old_pid) = content.trim().parse::<i32>() {
-                     if check_process_running(old_pid) {
-                         anyhow::bail!("Master process is already running (PID: {})", old_pid);
-                     }
-                 }
+                if let Ok(old_pid) = content.trim().parse::<i32>() {
+                    if check_process_running(old_pid) {
+                        anyhow::bail!("Master process is already running (PID: {})", old_pid);
+                    }
+                }
             }
         }
-        
+
         let mut pid_file = File::create(PID_FILE).context("Failed to create PID file")?;
         write!(pid_file, "{}", pid)?;
         info!("Written PID {} to {}", pid, PID_FILE);
