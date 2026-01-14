@@ -1,24 +1,51 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
 #[command(name = "auto-scanner")]
 #[command(about = "Automated Facebook account verification tool", long_about = None)]
 pub struct Cli {
-    /// Path to the CSV file containing account credentials
-    #[arg(short, long, value_name = "FILE")]
-    pub input: String,
+    #[command(subcommand)]
+    pub command: Commands,
+}
 
-    /// Browser backend to use
-    #[arg(long, default_value = "playwright")]
-    pub backend: String,
+#[derive(Subcommand, Debug, Clone)]
+pub enum Commands {
+    /// Run in master mode to manage workers and accounts
+    Master {
+        /// Directory to monitor for CSV files
+        #[arg(short, long, value_name = "DIR")]
+        input: String,
 
-    /// Remote debugging URL for the browser
-    #[arg(long, default_value = "http://localhost:9222")]
-    pub remote_url: String,
+        /// Browser backend to use
+        #[arg(long, default_value = "playwright")]
+        backend: String,
 
-    /// Number of threads to use
-    #[arg(long, default_value = "1")]
-    pub thread_count: usize,
+        /// Base remote debugging URL for the browser
+        #[arg(long, default_value = "http://localhost:9222")]
+        remote_url: String,
+
+        /// Number of concurrent workers to spawn
+        #[arg(long, default_value = "1")]
+        thread_count: usize,
+    },
+    /// Run in worker mode to perform a single login (usually called by master)
+    Worker {
+        /// Account username
+        #[arg(long)]
+        username: String,
+
+        /// Account password
+        #[arg(long)]
+        password: String,
+
+        /// Specific remote debugging URL for this worker
+        #[arg(long)]
+        remote_url: String,
+
+        /// Browser backend to use
+        #[arg(long, default_value = "playwright")]
+        backend: String,
+    },
 }
 
 #[cfg(test)]
@@ -26,22 +53,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_cli_with_input_short() {
-        let cli = Cli::try_parse_from(&["auto-scanner", "-i", "accounts.csv"]);
+    fn test_cli_master_mode() {
+        let cli = Cli::try_parse_from(&["auto-scanner", "master", "-i", "accounts.csv"]);
         assert!(cli.is_ok());
-        assert_eq!(cli.unwrap().input, "accounts.csv");
+        if let Commands::Master { input, .. } = cli.unwrap().command {
+            assert_eq!(input, "accounts.csv");
+        } else {
+            panic!("Expected Master command");
+        }
     }
 
     #[test]
-    fn test_cli_with_input_long() {
-        let cli = Cli::try_parse_from(&["auto-scanner", "--input", "test.csv"]);
+    fn test_cli_worker_mode() {
+        let cli = Cli::try_parse_from(&[
+            "auto-scanner",
+            "worker",
+            "--username",
+            "user",
+            "--password",
+            "pass",
+            "--remote-url",
+            "http://localhost:9222",
+        ]);
         assert!(cli.is_ok());
-        assert_eq!(cli.unwrap().input, "test.csv");
-    }
-
-    #[test]
-    fn test_cli_without_input_should_fail() {
-        let cli = Cli::try_parse_from(&["auto-scanner"]);
-        assert!(cli.is_err());
+        if let Commands::Worker { username, password, .. } = cli.unwrap().command {
+            assert_eq!(username, "user");
+            assert_eq!(password, "pass");
+        } else {
+            panic!("Expected Worker command");
+        }
     }
 }

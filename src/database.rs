@@ -16,8 +16,7 @@ impl Database {
         info!("Initializing database at: {}", db_path.display());
 
         let db_url = format!("sqlite:{}", db_path.display());
-        let options = SqliteConnectOptions::from_str(&db_url)?
-            .create_if_missing(true);
+        let options = SqliteConnectOptions::from_str(&db_url)?.create_if_missing(true);
 
         let pool = SqlitePoolOptions::new()
             .max_connections(5)
@@ -45,15 +44,17 @@ impl Database {
         Ok(())
     }
 
-    pub async fn insert_account(&self, account: &Account) -> Result<i64> {
+    pub async fn insert_account(&self, account: &Account, batch: Option<&str>) -> Result<i64> {
         let result = sqlx::query(
-            "INSERT INTO accounts (username, password) VALUES (?1, ?2)
+            "INSERT INTO accounts (username, password, batch) VALUES (?1, ?2, ?3)
              ON CONFLICT(username) DO UPDATE SET 
              password = excluded.password,
-             updated_at = CURRENT_TIMESTAMP"
+             batch = excluded.batch,
+             updated_at = CURRENT_TIMESTAMP",
         )
         .bind(&account.username)
         .bind(&account.password)
+        .bind(batch)
         .execute(&self.pool)
         .await
         .context("Failed to insert account")?;
@@ -61,12 +62,16 @@ impl Database {
         Ok(result.last_insert_rowid())
     }
 
-    pub async fn insert_accounts(&self, accounts: &[Account]) -> Result<usize> {
+    pub async fn insert_accounts(
+        &self,
+        accounts: &[Account],
+        batch: Option<&str>,
+    ) -> Result<usize> {
         info!("Inserting {} accounts into database", accounts.len());
         let mut count = 0;
 
         for account in accounts {
-            match self.insert_account(account).await {
+            match self.insert_account(account, batch).await {
                 Ok(_) => count += 1,
                 Err(e) => {
                     warn!("Failed to insert account {}: {}", account.username, e);
@@ -78,6 +83,34 @@ impl Database {
         Ok(count)
     }
 
+    pub async fn update_login_result(
+        &self,
+        username: &str,
+        success: bool,
+        captcha: Option<&str>,
+        two_fa: Option<&str>,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE accounts SET 
+             success = ?1, 
+             captcha = ?2, 
+             two_fa = ?3, 
+             status = 'completed',
+             last_checked_at = CURRENT_TIMESTAMP,
+             updated_at = CURRENT_TIMESTAMP
+             WHERE username = ?4",
+        )
+        .bind(success)
+        .bind(captcha)
+        .bind(two_fa)
+        .bind(username)
+        .execute(&self.pool)
+        .await
+        .context("Failed to update login result")?;
+
+        Ok(())
+    }
+
     pub async fn get_account_count(&self) -> Result<i64> {
         let row = sqlx::query("SELECT COUNT(*) as count FROM accounts")
             .fetch_one(&self.pool)
@@ -87,14 +120,23 @@ impl Database {
     }
 
     pub async fn get_all_accounts(&self) -> Result<Vec<Account>> {
-        let accounts = sqlx::query_as::<_, (String, String)>(
-            "SELECT username, password FROM accounts ORDER BY id"
+        let rows = sqlx::query(
+            "SELECT username, password, success, captcha, two_fa, batch FROM accounts ORDER BY id",
         )
         .fetch_all(&self.pool)
-        .await?
-        .into_iter()
-        .map(|(username, password)| Account { username, password })
-        .collect();
+        .await?;
+
+        let accounts = rows
+            .into_iter()
+            .map(|row| Account {
+                username: row.get("username"),
+                password: row.get("password"),
+                success: row.get("success"),
+                captcha: row.get("captcha"),
+                two_fa: row.get("two_fa"),
+                batch: row.get("batch"),
+            })
+            .collect();
 
         Ok(accounts)
     }
@@ -119,12 +161,9 @@ mod tests {
         let temp_db = NamedTempFile::new().unwrap();
         let db = Database::new(temp_db.path()).await.unwrap();
 
-        let account = Account {
-            username: "test@example.com".to_string(),
-            password: "password123".to_string(),
-        };
+        let account = Account::new("test@example.com".to_string(), "password123".to_string());
 
-        let id = db.insert_account(&account).await.unwrap();
+        let id = db.insert_account(&account, Some("batch1")).await.unwrap();
         assert!(id > 0);
 
         let count = db.get_account_count().await.unwrap();
@@ -136,19 +175,13 @@ mod tests {
         let temp_db = NamedTempFile::new().unwrap();
         let db = Database::new(temp_db.path()).await.unwrap();
 
-        let account1 = Account {
-            username: "test@example.com".to_string(),
-            password: "password123".to_string(),
-        };
+        let account1 = Account::new("test@example.com".to_string(), "password123".to_string());
 
-        db.insert_account(&account1).await.unwrap();
+        db.insert_account(&account1, None).await.unwrap();
 
-        let account2 = Account {
-            username: "test@example.com".to_string(),
-            password: "newpassword456".to_string(),
-        };
+        let account2 = Account::new("test@example.com".to_string(), "newpassword456".to_string());
 
-        db.insert_account(&account2).await.unwrap();
+        db.insert_account(&account2, None).await.unwrap();
 
         let count = db.get_account_count().await.unwrap();
         assert_eq!(count, 1);
@@ -163,21 +196,15 @@ mod tests {
         let db = Database::new(temp_db.path()).await.unwrap();
 
         let accounts = vec![
-            Account {
-                username: "user1@test.com".to_string(),
-                password: "pass1".to_string(),
-            },
-            Account {
-                username: "user2@test.com".to_string(),
-                password: "pass2".to_string(),
-            },
-            Account {
-                username: "user3@test.com".to_string(),
-                password: "pass3".to_string(),
-            },
+            Account::new("user1@test.com".to_string(), "pass1".to_string()),
+            Account::new("user2@test.com".to_string(), "pass2".to_string()),
+            Account::new("user3@test.com".to_string(), "pass3".to_string()),
         ];
 
-        let count = db.insert_accounts(&accounts).await.unwrap();
+        let count = db
+            .insert_accounts(&accounts, Some("batch_multiple"))
+            .await
+            .unwrap();
         assert_eq!(count, 3);
 
         let total = db.get_account_count().await.unwrap();
@@ -190,17 +217,11 @@ mod tests {
         let db = Database::new(temp_db.path()).await.unwrap();
 
         let accounts = vec![
-            Account {
-                username: "user1@test.com".to_string(),
-                password: "pass1".to_string(),
-            },
-            Account {
-                username: "user2@test.com".to_string(),
-                password: "pass2".to_string(),
-            },
+            Account::new("user1@test.com".to_string(), "pass1".to_string()),
+            Account::new("user2@test.com".to_string(), "pass2".to_string()),
         ];
 
-        db.insert_accounts(&accounts).await.unwrap();
+        db.insert_accounts(&accounts, None).await.unwrap();
 
         let retrieved = db.get_all_accounts().await.unwrap();
         assert_eq!(retrieved.len(), 2);
