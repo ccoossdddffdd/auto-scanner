@@ -5,3 +5,4 @@ pub mod models;
 pub mod browser;
 pub mod master;
 pub mod worker;
+pub mod adspower;

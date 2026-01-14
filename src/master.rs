@@ -1,3 +1,4 @@
+use crate::adspower::AdsPowerClient;
 use crate::csv_reader::read_accounts_from_csv;
 use crate::database::Database;
 use anyhow::{Context, Result};
@@ -9,7 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tokio::process::Command;
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::mpsc;
 use tracing::{error, info};
 
 pub async fn run(
@@ -20,11 +21,17 @@ pub async fn run(
     enable_screenshot: bool,
 ) -> Result<()> {
     info!(
-        "Master started. Monitoring directory: {}, Threads: {}, Screenshots: {}",
-        input_dir, thread_count, enable_screenshot
+        "Master started. Monitoring directory: {}, Threads: {}, Screenshots: {}, Backend: {}",
+        input_dir, thread_count, enable_screenshot, backend
     );
 
     let db = Arc::new(Database::new("auto-scanner.db").await?);
+    let adspower = if backend == "adspower" {
+        Some(Arc::new(AdsPowerClient::new()))
+    } else {
+        None
+    };
+
     let input_path = PathBuf::from(&input_dir);
 
     if !input_path.exists() {
@@ -80,8 +87,21 @@ pub async fn run(
 
     watcher.watch(&input_path, RecursiveMode::NonRecursive)?;
 
+    // We use a custom semaphore implementation to track which thread ID is available
+    // Instead of just counting permits, we need to know WHICH specific permit (0..thread_count-1) we got.
+    let (permit_tx, permit_rx) = async_channel::bounded(thread_count);
+    for i in 0..thread_count {
+        permit_tx
+            .send(i)
+            .await
+            .expect("Failed to initialize thread pool");
+    }
+
+    // We keep the original semaphore just for limiting concurrency count if needed,
+    // but the real resource management is done via the channel above.
+    // Actually, we can just use the channel as the semaphore.
+
     let exe_path = env::current_exe().context("Failed to get current executable path")?;
-    let semaphore = Arc::new(Semaphore::new(thread_count));
 
     info!("Waiting for new CSV files...");
 
@@ -103,10 +123,12 @@ pub async fn run(
             &csv_path,
             &batch_name,
             db.clone(),
+            adspower.clone(),
             &exe_path,
             &backend,
             &remote_url,
-            semaphore.clone(),
+            permit_rx.clone(),
+            permit_tx.clone(),
             enable_screenshot,
         )
         .await;
@@ -142,10 +164,12 @@ async fn process_file(
     path: &Path,
     batch_name: &str,
     db: Arc<Database>,
+    adspower: Option<Arc<AdsPowerClient>>,
     exe_path: &PathBuf,
     backend: &str,
     remote_url: &str,
-    semaphore: Arc<Semaphore>,
+    permit_rx: async_channel::Receiver<usize>,
+    permit_tx: async_channel::Sender<usize>,
     enable_screenshot: bool,
 ) -> Result<()> {
     let accounts = read_accounts_from_csv(path.to_str().unwrap()).await?;
@@ -156,15 +180,64 @@ async fn process_file(
     let mut handles = Vec::new();
 
     for account in accounts {
-        let permit = semaphore.clone().acquire_owned().await.unwrap();
+        let thread_index = permit_rx.recv().await.unwrap();
+
         let exe_path = exe_path.clone();
         let username = account.username.clone();
         let password = account.password.clone();
         let backend_str = backend.to_string();
         let remote_url_str = remote_url.to_string();
 
+        let adspower = adspower.clone();
+        let permit_tx = permit_tx.clone();
+
         let handle = tokio::spawn(async move {
-            info!("Spawning worker for {}", username);
+            info!(
+                "Spawning worker for {} on thread {}",
+                username, thread_index
+            );
+
+            // Handle AdsPower lifecycle if enabled
+            let mut adspower_id = None;
+            let mut active_remote_url = remote_url_str.clone();
+
+            if let Some(client) = &adspower {
+                match client.ensure_profile_for_thread(thread_index).await {
+                    Ok(id) => {
+                        info!(
+                            "Using AdsPower profile {} (thread {}) for {}",
+                            id, thread_index, username
+                        );
+
+                        // Update profile settings (clear cookies/cache logic inside)
+                        if let Err(e) = client.update_profile_for_account(&id, &username).await {
+                            error!("Failed to update AdsPower profile for {}: {}", username, e);
+                            let _ = permit_tx.send(thread_index).await;
+                            return;
+                        }
+
+                        match client.start_browser(&id).await {
+                            Ok(ws_url) => {
+                                adspower_id = Some(id);
+                                active_remote_url = ws_url;
+                            }
+                            Err(e) => {
+                                error!("Failed to start AdsPower browser for {}: {}", username, e);
+                                let _ = permit_tx.send(thread_index).await;
+                                return; // Skip this worker
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!(
+                            "Failed to check/create AdsPower profile for thread {}: {}",
+                            thread_index, e
+                        );
+                        let _ = permit_tx.send(thread_index).await;
+                        return; // Skip this worker
+                    }
+                }
+            }
 
             let mut cmd = Command::new(exe_path);
             cmd.arg("worker")
@@ -173,7 +246,7 @@ async fn process_file(
                 .arg("--password")
                 .arg(&password)
                 .arg("--remote-url")
-                .arg(&remote_url_str)
+                .arg(&active_remote_url)
                 .arg("--backend")
                 .arg(&backend_str);
 
@@ -182,6 +255,13 @@ async fn process_file(
             }
 
             let status = cmd.status().await;
+
+            // Cleanup AdsPower
+            if let Some(client) = &adspower {
+                if let Some(id) = adspower_id {
+                    let _ = client.stop_browser(&id).await;
+                }
+            }
 
             match status {
                 Ok(s) if s.success() => {
@@ -195,7 +275,7 @@ async fn process_file(
                 }
             }
 
-            drop(permit);
+            let _ = permit_tx.send(thread_index).await;
         });
 
         handles.push(handle);
