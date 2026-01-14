@@ -32,7 +32,7 @@ pub async fn run(
     if status {
         return check_status();
     }
-    
+
     if stop {
         return stop_master();
     }
@@ -120,9 +120,9 @@ pub async fn run(
             match res {
                 Ok(event) => {
                     info!("Received file event: {:?}", event.kind);
-                    // Match Create, Modify (for moves/overwrites), or Rename (for moves into dir)
+                    // Match Create only, as requested
                     match event.kind {
-                        EventKind::Create(_) | EventKind::Modify(_) | EventKind::Any => {
+                        EventKind::Create(_) => {
                             for path in event.paths {
                                 if is_csv_file(&path) {
                                     let mut processing = processing_files_clone.lock().unwrap();
