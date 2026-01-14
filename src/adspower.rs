@@ -5,7 +5,7 @@ use serde_json::json;
 use std::time::Duration;
 use tracing::{info, warn};
 
-const ADSPOWER_API_URL: &str = "http://local.adspower.net:50325";
+const ADSPOWER_API_URL: &str = "http://127.0.0.1:50325";
 
 #[derive(Debug, Deserialize)]
 struct ApiResponse<T> {
@@ -49,6 +49,7 @@ impl AdsPowerClient {
         Self {
             client: Client::builder()
                 .timeout(Duration::from_secs(30))
+                .no_proxy()
                 .build()
                 .expect("Failed to create reqwest client"),
         }

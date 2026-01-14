@@ -1,35 +1,46 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use auto_scanner::cli::{Cli, Commands};
 use auto_scanner::master;
 use auto_scanner::worker;
 use clap::Parser;
+use daemonize::Daemonize;
+use std::fs::File;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-#[tokio::main]
-async fn main() -> Result<()> {
+const PID_FILE: &str = "auto-scanner-master.pid";
+
+fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Master {
-            input,
-            backend,
-            remote_url,
-            thread_count,
-            enable_screenshot,
-            stop,
-            daemon,
-        } => {
-            // Initialize logging here for Master, as it might need to happen after daemonization
-            master::run(
-                input,
-                backend,
-                remote_url,
-                thread_count,
-                enable_screenshot,
-                stop,
-                daemon,
-            )
-            .await?;
+        Commands::Master { input, backend, remote_url, thread_count, enable_screenshot, stop, daemon } => {
+            if daemon && !stop {
+                let stdout = File::create("logs/auto-scanner.out").context("Failed to create stdout file")?;
+                let stderr = File::create("logs/auto-scanner.err").context("Failed to create stderr file")?;
+        
+                let daemonize = Daemonize::new()
+                    .pid_file(PID_FILE) // Use daemonize to handle PID file creation
+                    .chown_pid_file(true)
+                    .working_directory(".")
+                    .stdout(stdout)
+                    .stderr(stderr);
+        
+                match daemonize.start() {
+                    Ok(_) => {
+                        // We are now in the daemon process
+                    }
+                    Err(e) => {
+                        eprintln!("Error, {}", e);
+                        anyhow::bail!("Failed to daemonize: {}", e);
+                    }
+                }
+            }
+
+            // Create runtime and run master
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(async {
+                 master::run(input, backend, remote_url, thread_count, enable_screenshot, stop, daemon).await
+            })?;
         }
         Commands::Worker {
             username,
@@ -55,7 +66,10 @@ async fn main() -> Result<()> {
                 )
                 .init();
 
-            worker::run(username, password, remote_url, backend, enable_screenshot).await?;
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(async {
+                worker::run(username, password, remote_url, backend, enable_screenshot).await
+            })?;
         }
     }
 
