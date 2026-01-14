@@ -13,8 +13,8 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Master { input, backend, remote_url, thread_count, enable_screenshot, stop, daemon } => {
-            if daemon && !stop {
+        Commands::Master { input, backend, remote_url, thread_count, enable_screenshot, stop, daemon, status } => {
+            if daemon && !stop && !status {
                 let stdout = File::create("logs/auto-scanner.out").context("Failed to create stdout file")?;
                 let stderr = File::create("logs/auto-scanner.err").context("Failed to create stderr file")?;
         
@@ -39,7 +39,7 @@ fn main() -> Result<()> {
             // Create runtime and run master
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(async {
-                 master::run(input, backend, remote_url, thread_count, enable_screenshot, stop, daemon).await
+                 master::run(input, backend, remote_url, thread_count, enable_screenshot, stop, daemon, status).await
             })?;
         }
         Commands::Worker {

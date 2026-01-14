@@ -27,7 +27,12 @@ pub async fn run(
     enable_screenshot: bool,
     stop: bool,
     daemon: bool,
+    status: bool,
 ) -> Result<()> {
+    if status {
+        return check_status();
+    }
+    
     if stop {
         return stop_master();
     }
@@ -223,6 +228,30 @@ pub async fn run(
 fn check_process_running(pid: i32) -> bool {
     // 0 signal checks if process exists and we have permission
     signal::kill(Pid::from_raw(pid), None).is_ok()
+}
+
+fn check_status() -> Result<()> {
+    let pid_path = Path::new(PID_FILE);
+    if !pid_path.exists() {
+        println!("Not running");
+        return Ok(());
+    }
+
+    let pid_str = fs::read_to_string(pid_path).context("Failed to read PID file")?;
+    let pid: i32 = pid_str.trim().parse().context("Failed to parse PID")?;
+
+    match signal::kill(Pid::from_raw(pid), None) {
+        Ok(_) => {
+            println!("Running (PID: {})", pid);
+        }
+        Err(_) => {
+            println!("Not running (Stale PID file found)");
+            // Optional: clean up stale PID file
+            // fs::remove_file(pid_path).ok();
+        }
+    }
+
+    Ok(())
 }
 
 fn stop_master() -> Result<()> {

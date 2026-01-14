@@ -13,7 +13,7 @@ pub enum Commands {
     /// Run in master mode to manage workers and accounts
     Master {
         /// Directory to monitor for CSV files
-        #[arg(short, long, value_name = "DIR", required_unless_present = "stop")]
+        #[arg(short, long, value_name = "DIR", required_unless_present_any = ["stop", "status"])]
         input: Option<String>,
 
         /// Browser backend to use
@@ -39,6 +39,10 @@ pub enum Commands {
         /// Run as a background daemon
         #[arg(long, default_value = "false")]
         daemon: bool,
+
+        /// Check if the master process is running
+        #[arg(long, default_value = "false")]
+        status: bool,
     },
     /// Run in worker mode to perform a single login (usually called by master)
     Worker {
