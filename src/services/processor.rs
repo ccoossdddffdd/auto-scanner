@@ -8,15 +8,50 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::{error, info, warn};
 
+/// 浏览器配置
+#[derive(Clone)]
+pub struct BrowserConfig {
+    pub backend: String,
+    pub remote_url: String,
+    pub adspower: Option<Arc<AdsPowerClient>>,
+}
+
+/// Worker 配置
+#[derive(Clone)]
+pub struct WorkerConfig {
+    pub exe_path: PathBuf,
+    pub enable_screenshot: bool,
+}
+
+/// 文件配置
+#[derive(Clone)]
+pub struct FileConfig {
+    pub doned_dir: PathBuf,
+}
+
+/// 处理配置
 #[derive(Clone)]
 pub struct ProcessConfig {
     pub batch_name: String,
-    pub adspower: Option<Arc<AdsPowerClient>>,
-    pub backend: String,
-    pub remote_url: String,
-    pub exe_path: PathBuf,
-    pub enable_screenshot: bool,
-    pub doned_dir: PathBuf,
+    pub browser: BrowserConfig,
+    pub worker: WorkerConfig,
+    pub file: FileConfig,
+}
+
+impl ProcessConfig {
+    pub fn new(
+        batch_name: String,
+        browser: BrowserConfig,
+        worker: WorkerConfig,
+        file: FileConfig,
+    ) -> Self {
+        Self {
+            batch_name,
+            browser,
+            worker,
+            file,
+        }
+    }
 }
 
 async fn handle_email_notification(
@@ -98,11 +133,11 @@ pub async fn process_file(
         let coordinator = WorkerCoordinator {
             permit_rx,
             permit_tx,
-            adspower: config.adspower.clone(),
-            exe_path: config.exe_path.clone(),
-            backend: config.backend.clone(),
-            remote_url: config.remote_url.clone(),
-            enable_screenshot: config.enable_screenshot,
+            adspower: config.browser.adspower.clone(),
+            exe_path: config.worker.exe_path.clone(),
+            backend: config.browser.backend.clone(),
+            remote_url: config.browser.remote_url.clone(),
+            enable_screenshot: config.worker.enable_screenshot,
         };
 
         let mut handles = Vec::new();
@@ -128,7 +163,7 @@ pub async fn process_file(
             results,
             records,
             headers,
-            &config.doned_dir,
+            &config.file.doned_dir,
         )
         .await
     }

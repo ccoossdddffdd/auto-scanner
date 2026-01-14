@@ -24,11 +24,7 @@ fn main() -> Result<()> {
             email_poll_interval,
         } => {
             if daemon && !stop && !status {
-                start_daemon(
-                    PID_FILE,
-                    "logs/auto-scanner.out",
-                    "logs/auto-scanner.err",
-                )?;
+                start_daemon(PID_FILE, "logs/auto-scanner.out", "logs/auto-scanner.err")?;
             }
 
             // Create runtime and run master
@@ -59,14 +55,7 @@ fn main() -> Result<()> {
 
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(async {
-                worker::run(
-                    username,
-                    password,
-                    remote_url,
-                    backend,
-                    enable_screenshot,
-                )
-                .await
+                worker::run(username, password, remote_url, backend, enable_screenshot).await
             })?;
         }
     }

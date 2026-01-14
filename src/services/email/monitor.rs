@@ -29,41 +29,44 @@ pub struct EmailConfig {
 impl EmailConfig {
     /// 从.env文件创建配置
     pub fn from_env() -> Result<Self> {
-        // 加载.env文件
         dotenv::dotenv().ok();
 
         Ok(Self {
-            imap_server: std::env::var("EMAIL_IMAP_SERVER")
-                .unwrap_or_else(|_| "outlook.office365.com".to_string()),
-            imap_port: std::env::var("EMAIL_IMAP_PORT")
-                .unwrap_or_else(|_| "993".to_string())
-                .parse()
-                .context("Invalid EMAIL_IMAP_PORT")?,
-            smtp_server: std::env::var("EMAIL_SMTP_SERVER")
-                .unwrap_or_else(|_| "smtp.office365.com".to_string()),
-            smtp_port: std::env::var("EMAIL_SMTP_PORT")
-                .unwrap_or_else(|_| "587".to_string())
-                .parse()
-                .context("Invalid EMAIL_SMTP_PORT")?,
-            username: std::env::var("EMAIL_USERNAME")
-                .context("EMAIL_USERNAME not set in .env file")?,
-            password: std::env::var("EMAIL_PASSWORD")
-                .context("EMAIL_PASSWORD not set in .env file")?,
-            poll_interval: std::env::var("EMAIL_POLL_INTERVAL")
-                .unwrap_or_else(|_| "60".to_string())
-                .parse()
-                .context("Invalid EMAIL_POLL_INTERVAL")?,
-            processed_folder: std::env::var("EMAIL_PROCESSED_FOLDER")
-                .unwrap_or_else(|_| "已处理".to_string()),
-            subject_filter: std::env::var("EMAIL_SUBJECT_FILTER")
-                .unwrap_or_else(|_| "FB账号".to_string()),
-            input_dir: std::env::var("INPUT_DIR")
-                .unwrap_or_else(|_| "input".to_string())
-                .into(),
-            doned_dir: std::env::var("DONED_DIR")
-                .unwrap_or_else(|_| "input/doned".to_string())
-                .into(),
+            imap_server: Self::env_or("EMAIL_IMAP_SERVER", "outlook.office365.com"),
+            imap_port: Self::env_parse("EMAIL_IMAP_PORT", 993)?,
+            smtp_server: Self::env_or("EMAIL_SMTP_SERVER", "smtp.office365.com"),
+            smtp_port: Self::env_parse("EMAIL_SMTP_PORT", 587)?,
+            username: Self::env_required("EMAIL_USERNAME")?,
+            password: Self::env_required("EMAIL_PASSWORD")?,
+            poll_interval: Self::env_parse("EMAIL_POLL_INTERVAL", 60)?,
+            processed_folder: Self::env_or("EMAIL_PROCESSED_FOLDER", "已处理"),
+            subject_filter: Self::env_or("EMAIL_SUBJECT_FILTER", "FB账号"),
+            input_dir: Self::env_or("INPUT_DIR", "input").into(),
+            doned_dir: Self::env_or("DONED_DIR", "input/doned").into(),
         })
+    }
+
+    /// 读取环境变量或使用默认值
+    fn env_or(key: &str, default: &str) -> String {
+        std::env::var(key).unwrap_or_else(|_| default.to_string())
+    }
+
+    /// 读取并解析环境变量，失败时使用默认值
+    fn env_parse<T: std::str::FromStr>(key: &str, default: T) -> Result<T>
+    where
+        T::Err: std::fmt::Display,
+    {
+        match std::env::var(key) {
+            Ok(val) => val
+                .parse()
+                .map_err(|e| anyhow::anyhow!("Invalid {}: {}", key, e)),
+            Err(_) => Ok(default),
+        }
+    }
+
+    /// 读取必需的环境变量
+    fn env_required(key: &str) -> Result<String> {
+        std::env::var(key).context(format!("{} not set in .env file", key))
     }
 }
 

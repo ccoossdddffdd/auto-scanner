@@ -89,12 +89,7 @@ impl AccountSource for ExcelAccountSource {
         Ok((accounts, records, headers))
     }
 
-    async fn write(
-        &self,
-        path: &Path,
-        headers: &[String],
-        records: &[Vec<String>],
-    ) -> Result<()> {
+    async fn write(&self, path: &Path, headers: &[String], records: &[Vec<String>]) -> Result<()> {
         info!("Writing results to Excel file: {}", path.display());
 
         let mut workbook = Workbook::new();

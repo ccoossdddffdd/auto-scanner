@@ -10,12 +10,7 @@ use std::path::Path;
 #[async_trait]
 pub trait AccountSource {
     async fn read(&self, path: &Path) -> Result<(Vec<Account>, Vec<Vec<String>>, Vec<String>)>;
-    async fn write(
-        &self,
-        path: &Path,
-        headers: &[String],
-        records: &[Vec<String>],
-    ) -> Result<()>;
+    async fn write(&self, path: &Path, headers: &[String], records: &[Vec<String>]) -> Result<()>;
 }
 
 pub fn get_account_source(path: &Path) -> Box<dyn AccountSource + Send + Sync> {

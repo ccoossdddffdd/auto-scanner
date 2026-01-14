@@ -52,12 +52,7 @@ impl AccountSource for CsvAccountSource {
         Ok((accounts, records, headers))
     }
 
-    async fn write(
-        &self,
-        path: &Path,
-        headers: &[String],
-        records: &[Vec<String>],
-    ) -> Result<()> {
+    async fn write(&self, path: &Path, headers: &[String], records: &[Vec<String>]) -> Result<()> {
         info!("Writing results to CSV file: {}", path.display());
         let mut wtr = csv::Writer::from_path(path)?;
 

@@ -3,7 +3,9 @@ use crate::infrastructure::logging::init_logging;
 use crate::infrastructure::process::PidManager;
 use crate::services::email::monitor::{EmailConfig, EmailMonitor};
 use crate::services::email::tracker::FileTracker;
-use crate::services::processor::{process_file, ProcessConfig};
+use crate::services::processor::{
+    process_file, BrowserConfig, FileConfig, ProcessConfig, WorkerConfig,
+};
 use anyhow::{Context, Result};
 use async_channel;
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
@@ -214,15 +216,27 @@ pub async fn run(input_dir: Option<String>, config: MasterConfig) -> Result<()> 
                     .unwrap_or("unknown")
                     .to_string();
 
-                let process_config = ProcessConfig {
-                    batch_name: batch_name.clone(),
-                    adspower: adspower.clone(),
+                let browser_config = BrowserConfig {
                     backend: config.backend.clone(),
                     remote_url: config.remote_url.clone(),
+                    adspower: adspower.clone(),
+                };
+
+                let worker_config = WorkerConfig {
                     exe_path: exe_path.clone(),
                     enable_screenshot: config.enable_screenshot,
+                };
+
+                let file_config = FileConfig {
                     doned_dir: doned_dir.clone(),
                 };
+
+                let process_config = ProcessConfig::new(
+                    batch_name.clone(),
+                    browser_config,
+                    worker_config,
+                    file_config,
+                );
 
                 let result = process_file(
                     &csv_path,

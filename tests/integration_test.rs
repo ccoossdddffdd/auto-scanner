@@ -1,4 +1,4 @@
-use auto_scanner::master::{self, MasterConfig};
+use auto_scanner::services::master::{self, MasterConfig};
 use std::env;
 use std::fs;
 use std::path::PathBuf;

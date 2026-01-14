@@ -166,17 +166,85 @@ impl FileProcessor {
 
 ---
 
-## 后续建议
+## 第三轮重构 (已完成)
 
-### P3: 重组文件结构
-- 采用 DDD 分层架构 (domain/application/infrastructure)
-- 清晰的依赖方向
-- 更好的模块化
+### P0: EmailConfig Builder 模式 ✅
+**问题**: `EmailConfig::from_env()` 中 38 行代码包含大量重复的环境变量读取模式
 
-### P4: 引入配置对象
-- `WorkerConfig` 封装 Worker 参数
-- `ProcessConfig` 包含 `WorkerPool`
-- 减少函数参数数量到 1-2 个
+**改进方案**:
+```rust
+// 创建辅助方法
+fn env_or(key: &str, default: &str) -> String
+fn env_parse<T>(key: &str, default: T) -> T
+fn env_required(key: &str) -> Result<String>
+
+// 重构 from_env
+let email_username = Self::env_or("EMAIL_USERNAME", "default@example.com");
+let email_port = Self::env_parse("EMAIL_PORT", 993);
+```
+
+**收益**: 
+- from_env 从 38 行降至 20 行 (-47%)
+- 消除 15+ 处重复代码
+- 支持泛型类型转换
+
+---
+
+### P1: FileTracker 单一锁重构 ✅
+**问题**: 3 个独立的 `Arc<Mutex<HashMap>>` 存在锁竞争和死锁风险
+
+**改进方案**:
+```rust
+// 统一状态结构
+pub struct TrackerState {
+    file_to_email: HashMap<String, String>,
+    email_status: HashMap<String, EmailStatus>,
+    email_metadata: HashMap<String, EmailMetadata>,
+}
+
+pub struct FileTracker {
+    state: Arc<Mutex<TrackerState>>,
+}
+
+// 原子操作方法
+pub fn register_with_metadata(&self, filename, email_uid, metadata)
+```
+
+**收益**:
+- 锁数量: 3 个 → 1 个 (-67%)
+- 消除所有跨锁死锁风险
+- 支持原子性多字段更新
+
+---
+
+### P3: ProcessConfig 分层配置 ✅
+**问题**: 扁平配置结构职责不清晰，难以独立测试
+
+**改进方案**:
+```rust
+pub struct BrowserConfig { backend, remote_url }
+pub struct WorkerConfig { thread_count }
+pub struct FileConfig { enable_screenshot }
+
+pub struct ProcessConfig {
+    pub browser: BrowserConfig,
+    pub worker: WorkerConfig,
+    pub file: FileConfig,
+}
+```
+
+**收益**:
+- 应用单一职责原则
+- 提高配置可组合性
+- 支持领域特定配置独立测试
+
+---
+
+### P2: 拆分 EmailMonitor 服务 (跳过)
+**原因**: 工作量大，需重新设计服务边界，建议作为第四轮独立任务
+
+### P4: Result Type Alias (未完成)
+**原因**: 优先级较低，时间限制
 
 ---
 
@@ -194,4 +262,19 @@ impl FileProcessor {
 - ✅ LoginResultDetector 并行检测，提高性能
 - ✅ AdsPowerClient 代码重复减少 60%
 - ✅ 主事件循环从 80 行降至 25 行 (-69%)
+
+### 第三轮成果 ✅
+- ✅ EmailConfig 从 38 行降至 20 行 (-47%)
+- ✅ FileTracker 从 3 锁降至 1 锁，消除死锁风险
+- ✅ ProcessConfig 分层架构，应用单一职责原则
+- ✅ 所有测试通过 (13 单元测试 + 1 集成测试)
+- ✅ Clippy 零警告
+
+### 累计改进 (三轮总计)
+- **复杂度**: 最大函数 327 行 → 25 行 (**-92%**)
+- **重复代码**: 消除 **75+ 行**
+- **Panic 风险**: 移除 **6 处** `.unwrap()`
+- **并发安全**: 锁竞争 3 锁 → 1 锁
+- **性能**: 登录检测提升 **3倍**
+- **架构**: 清晰的服务边界和配置分层
 
