@@ -119,10 +119,10 @@ pub async fn run(
         move |res: notify::Result<notify::Event>| {
             match res {
                 Ok(event) => {
-                    info!("Received file event: {:?}", event.kind);
                     // Match Create only, as requested
                     match event.kind {
                         EventKind::Create(_) => {
+                            info!("Received file event: {:?}", event.kind);
                             for path in event.paths {
                                 if is_csv_file(&path) {
                                     let mut processing = processing_files_clone.lock().unwrap();
@@ -440,10 +440,17 @@ fn rename_processed_file(path: &Path) -> Result<()> {
         .and_then(|s| s.to_str())
         .context("Invalid filename")?;
 
-    let new_name = format!("{}.done-{}.csv", file_name, now);
-    let new_path = path.with_file_name(new_name);
+    let parent = path.parent().context("Invalid file path")?;
+    let doned_dir = parent.join("doned");
 
-    fs::rename(path, &new_path).context("Failed to rename processed file")?;
-    info!("Renamed file to {:?}", new_path);
+    if !doned_dir.exists() {
+        fs::create_dir_all(&doned_dir).context("Failed to create doned directory")?;
+    }
+
+    let new_name = format!("{}.done-{}.csv", file_name, now);
+    let new_path = doned_dir.join(new_name);
+
+    fs::rename(path, &new_path).context("Failed to move processed file to doned directory")?;
+    info!("Moved processed file to {:?}", new_path);
     Ok(())
 }
