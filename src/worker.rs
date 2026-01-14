@@ -1,14 +1,7 @@
 use crate::browser::{playwright_adapter::PlaywrightAdapter, BrowserAdapter};
-use crate::database::Database;
-use crate::models::Account;
+use crate::models::{Account, WorkerResult};
 use anyhow::{Context, Result};
 use tracing::{error, info};
-
-pub struct LoginOutcome {
-    pub success: bool,
-    pub captcha: Option<String>,
-    pub two_fa: Option<String>,
-}
 
 use chrono::Local;
 use std::fs;
@@ -28,9 +21,6 @@ pub async fn run(
 
     let account = Account::new(username.clone(), password);
 
-    // Initialize DB first to ensure we can log failures even if browser init fails
-    let db = Database::new("auto-scanner.db").await?;
-
     let adapter_result: Result<Box<dyn BrowserAdapter>> = match backend.as_str() {
         "playwright" | "cdp" | "adspower" => {
             match PlaywrightAdapter::new(&remote_url).await {
@@ -45,34 +35,37 @@ pub async fn run(
         Ok(a) => a,
         Err(e) => {
             error!("Browser initialization failed for {}: {}", username, e);
-            // Log failure to DB? currently update_login_result assumes login attempted.
-            // We can treat this as a failed login attempt with no special status.
-            db.update_login_result(&username, false, None, None).await?;
+            let result = WorkerResult {
+                status: "Login Failed".to_string(),
+                captcha: "Unknown".to_string(),
+                two_fa: "Unknown".to_string(),
+                message: format!("Browser init failed: {}", e),
+            };
+            println!("RESULT_JSON:{}", serde_json::to_string(&result)?);
             return Err(e);
         }
     };
 
-    match perform_login(adapter.as_ref(), &account, enable_screenshot).await {
+    let result = match perform_login(adapter.as_ref(), &account, enable_screenshot).await {
         Ok(outcome) => {
             info!(
                 "Login process finished for {}. Success: {}",
-                username, outcome.success
+                username, outcome.status
             );
-            db.update_login_result(
-                &username,
-                outcome.success,
-                outcome.captcha.as_deref(),
-                outcome.two_fa.as_deref(),
-            )
-            .await?;
+            outcome
         }
         Err(e) => {
             error!("Login failed for {}: {}", username, e);
-            db.update_login_result(&username, false, None, None).await?;
-            anyhow::bail!("Login execution failed: {}", e);
+            WorkerResult {
+                status: "Login Failed".to_string(),
+                captcha: "Unknown".to_string(),
+                two_fa: "Unknown".to_string(),
+                message: format!("Login error: {}", e),
+            }
         }
-    }
+    };
 
+    println!("RESULT_JSON:{}", serde_json::to_string(&result)?);
     info!("Worker completed for {}", username);
     Ok(())
 }
@@ -81,7 +74,7 @@ async fn perform_login(
     adapter: &dyn BrowserAdapter,
     account: &Account,
     enable_screenshot: bool,
-) -> Result<LoginOutcome> {
+) -> Result<WorkerResult> {
     info!("Navigating to Facebook...");
     adapter.navigate("https://www.facebook.com").await?;
 
@@ -102,15 +95,13 @@ async fn perform_login(
     // Wait for navigation or state change
     tokio::time::sleep(std::time::Duration::from_secs(8)).await;
 
-    // Check for success or specific states
-    let mut outcome = LoginOutcome {
-        success: false,
-        captcha: None,
-        two_fa: None,
+    let mut result = WorkerResult {
+        status: "Login Failed".to_string(),
+        captcha: "Not Needed".to_string(),
+        two_fa: "Not Needed".to_string(),
+        message: "Unknown failure".to_string(),
     };
 
-    // Placeholder logic for detecting states
-    // In a real scenario, we would check for specific selectors or URL changes
     if adapter
         .is_visible("a[aria-label='Facebook']")
         .await
@@ -121,21 +112,24 @@ async fn perform_login(
             .unwrap_or(false)
     {
         info!("Login detected as successful");
-        outcome.success = true;
+        result.status = "Login Success".to_string();
+        result.message = "Success".to_string();
     } else if adapter
         .is_visible("input[name='captcha_response']")
         .await
         .unwrap_or(false)
     {
         info!("Captcha detected");
-        outcome.captcha = Some("Detected".to_string());
+        result.captcha = "Needed".to_string();
+        result.message = "Captcha detected".to_string();
     } else if adapter
         .is_visible("input[name='approvals_code']")
         .await
         .unwrap_or(false)
     {
         info!("2FA detected");
-        outcome.two_fa = Some("Detected".to_string());
+        result.two_fa = "Needed".to_string();
+        result.message = "2FA detected".to_string();
     }
 
     if enable_screenshot {
@@ -153,5 +147,5 @@ async fn perform_login(
         info!("Screenshot saved to {}", filename);
     }
 
-    Ok(outcome)
+    Ok(result)
 }

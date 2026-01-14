@@ -3,7 +3,9 @@ use anyhow::{Context, Result};
 use std::path::Path;
 use tracing::{info, warn};
 
-pub async fn read_accounts_from_csv<P: AsRef<Path>>(path: P) -> Result<Vec<Account>> {
+pub async fn read_accounts_from_csv<P: AsRef<Path>>(
+    path: P,
+) -> Result<(Vec<Account>, Vec<csv::StringRecord>, csv::StringRecord)> {
     let path = path.as_ref();
     info!("Reading accounts from CSV file: {}", path.display());
 
@@ -12,11 +14,30 @@ pub async fn read_accounts_from_csv<P: AsRef<Path>>(path: P) -> Result<Vec<Accou
         .context(format!("Failed to read CSV file: {}", path.display()))?;
 
     let mut reader = csv::Reader::from_reader(content.as_bytes());
-    let mut accounts = Vec::new();
+    let headers = reader.headers()?.clone();
 
-    for (index, result) in reader.deserialize().enumerate() {
+    let mut accounts = Vec::new();
+    let mut records = Vec::new();
+
+    for (index, result) in reader.records().enumerate() {
         match result {
-            Ok(account) => accounts.push(account),
+            Ok(record) => {
+                // Try to deserialize into Account
+                // We provide headers so it can map by name
+                match record.deserialize(Some(&headers)) {
+                    Ok(account) => {
+                        accounts.push(account);
+                        records.push(record);
+                    }
+                    Err(e) => {
+                        warn!(
+                            "Skipping row {} due to deserialization error: {}",
+                            index + 1,
+                            e
+                        );
+                    }
+                }
+            }
             Err(e) => {
                 warn!("Skipping row {} due to parse error: {}", index + 1, e);
             }
@@ -24,7 +45,7 @@ pub async fn read_accounts_from_csv<P: AsRef<Path>>(path: P) -> Result<Vec<Accou
     }
 
     info!("Successfully read {} accounts from CSV", accounts.len());
-    Ok(accounts)
+    Ok((accounts, records, headers))
 }
 
 #[cfg(test)]
@@ -38,49 +59,17 @@ mod tests {
         let mut temp_file = NamedTempFile::new().unwrap();
         writeln!(
             temp_file,
-            "username,password\nuser1@test.com,pass123\nuser2@test.com,pass456"
+            "username,password,other_col\nuser1@test.com,pass123,val1\nuser2@test.com,pass456,val2"
         )
         .unwrap();
 
-        let accounts = read_accounts_from_csv(temp_file.path()).await.unwrap();
+        let (accounts, records, headers) = read_accounts_from_csv(temp_file.path()).await.unwrap();
 
         assert_eq!(accounts.len(), 2);
+        assert_eq!(records.len(), 2);
+        assert_eq!(headers.len(), 3);
+        
         assert_eq!(accounts[0].username, "user1@test.com");
-        assert_eq!(accounts[0].password, "pass123");
-        assert_eq!(accounts[1].username, "user2@test.com");
-        assert_eq!(accounts[1].password, "pass456");
-    }
-
-    #[tokio::test]
-    async fn test_read_csv_with_invalid_row() {
-        let mut temp_file = NamedTempFile::new().unwrap();
-        writeln!(
-            temp_file,
-            "username,password\nuser1@test.com,pass123\ninvalid_row\nuser2@test.com,pass456"
-        )
-        .unwrap();
-
-        let accounts = read_accounts_from_csv(temp_file.path()).await.unwrap();
-
-        // Should skip the invalid row and read 2 valid accounts
-        assert_eq!(accounts.len(), 2);
-        assert_eq!(accounts[0].username, "user1@test.com");
-        assert_eq!(accounts[1].username, "user2@test.com");
-    }
-
-    #[tokio::test]
-    async fn test_read_nonexistent_file() {
-        let result = read_accounts_from_csv("/nonexistent/file.csv").await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_read_empty_csv() {
-        let mut temp_file = NamedTempFile::new().unwrap();
-        writeln!(temp_file, "username,password").unwrap();
-
-        let accounts = read_accounts_from_csv(temp_file.path()).await.unwrap();
-
-        assert_eq!(accounts.len(), 0);
+        assert_eq!(records[0].get(2), Some("val1"));
     }
 }

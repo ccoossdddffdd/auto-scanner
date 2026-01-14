@@ -10,6 +10,14 @@ pub struct Account {
     pub batch: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WorkerResult {
+    pub status: String,
+    pub captcha: String,
+    pub two_fa: String,
+    pub message: String,
+}
+
 impl Account {
     pub fn new(username: String, password: String) -> Self {
         Self {

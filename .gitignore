@@ -12,3 +12,4 @@ test_accounts.csv
 .DS_Store
 
 *.pid
+*.csv

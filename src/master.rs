@@ -1,6 +1,6 @@
 use crate::adspower::AdsPowerClient;
 use crate::csv_reader::read_accounts_from_csv;
-use crate::database::Database;
+use crate::models::WorkerResult;
 use anyhow::{Context, Result};
 use chrono::Local;
 use nix::sys::signal::{self, Signal};
@@ -38,7 +38,6 @@ pub async fn run(
     }
 
     // Initialize logging
-    // If not daemon, we still want stdout logging. If daemon, stdout is redirected to file.
     let file_appender = tracing_appender::rolling::daily("logs", "auto-scanner.log");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
@@ -61,13 +60,9 @@ pub async fn run(
         input_dir, thread_count, enable_screenshot, backend, daemon
     );
 
-    // If NOT in daemon mode, we handle PID file manually.
-    // Daemonize crate handles it automatically if configured.
     if !daemon {
-        // Write PID file
         let pid = std::process::id();
         if Path::new(PID_FILE).exists() {
-            // Check if process is actually running
             if let Ok(content) = fs::read_to_string(PID_FILE) {
                 if let Ok(old_pid) = content.trim().parse::<i32>() {
                     if check_process_running(old_pid) {
@@ -82,7 +77,6 @@ pub async fn run(
         info!("Written PID {} to {}", pid, PID_FILE);
     }
 
-    let db = Arc::new(Database::new("auto-scanner.db").await?);
     let adspower = if backend == "adspower" {
         Some(Arc::new(AdsPowerClient::new()))
     } else {
@@ -95,11 +89,9 @@ pub async fn run(
         fs::create_dir_all(&input_path).context("Failed to create monitoring directory")?;
     }
 
-    // Channel for file events
     let (tx, mut rx) = mpsc::channel(100);
     let processing_files = Arc::new(Mutex::new(HashSet::new()));
 
-    // Initial scan
     let entries = fs::read_dir(&input_path)?;
     for entry in entries {
         let entry = entry?;
@@ -112,40 +104,32 @@ pub async fn run(
         }
     }
 
-    // Setup watcher
     let tx_clone = tx.clone();
     let processing_files_clone = processing_files.clone();
     let mut watcher = RecommendedWatcher::new(
-        move |res: notify::Result<notify::Event>| {
-            match res {
-                Ok(event) => {
-                    // Match Create only, as requested
-                    match event.kind {
-                        EventKind::Create(_) => {
-                            info!("Received file event: {:?}", event.kind);
-                            for path in event.paths {
-                                if is_csv_file(&path) {
-                                    let mut processing = processing_files_clone.lock().unwrap();
-                                    if processing.insert(path.clone()) {
-                                        info!("Detected new CSV file: {:?}", path);
-                                        let _ = tx_clone.try_send(path);
-                                    }
-                                }
+        move |res: notify::Result<notify::Event>| match res {
+            Ok(event) => match event.kind {
+                EventKind::Create(_) => {
+                    info!("Received file event: {:?}", event.kind);
+                    for path in event.paths {
+                        if is_csv_file(&path) {
+                            let mut processing = processing_files_clone.lock().unwrap();
+                            if processing.insert(path.clone()) {
+                                info!("Detected new CSV file: {:?}", path);
+                                let _ = tx_clone.try_send(path);
                             }
                         }
-                        _ => {}
                     }
                 }
-                Err(e) => error!("Watch error: {:?}", e),
-            }
+                _ => {}
+            },
+            Err(e) => error!("Watch error: {:?}", e),
         },
         Config::default(),
     )?;
 
     watcher.watch(&input_path, RecursiveMode::NonRecursive)?;
 
-    // We use a custom semaphore implementation to track which thread ID is available
-    // Instead of just counting permits, we need to know WHICH specific permit (0..thread_count-1) we got.
     let (permit_tx, permit_rx) = async_channel::bounded(thread_count);
     for i in 0..thread_count {
         permit_tx
@@ -158,7 +142,6 @@ pub async fn run(
 
     info!("Waiting for new CSV files...");
 
-    // Setup signal handler for graceful shutdown
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
 
@@ -189,7 +172,6 @@ pub async fn run(
                 let result = process_file(
                     &csv_path,
                     &batch_name,
-                    db.clone(),
                     adspower.clone(),
                     &exe_path,
                     &backend,
@@ -218,7 +200,6 @@ pub async fn run(
         }
     }
 
-    // Cleanup PID file
     let _ = fs::remove_file(PID_FILE);
     info!("Master shutdown complete");
 
@@ -226,7 +207,6 @@ pub async fn run(
 }
 
 fn check_process_running(pid: i32) -> bool {
-    // 0 signal checks if process exists and we have permission
     signal::kill(Pid::from_raw(pid), None).is_ok()
 }
 
@@ -246,8 +226,6 @@ fn check_status() -> Result<()> {
         }
         Err(_) => {
             println!("Not running (Stale PID file found)");
-            // Optional: clean up stale PID file
-            // fs::remove_file(pid_path).ok();
         }
     }
 
@@ -275,7 +253,6 @@ fn stop_master() -> Result<()> {
         warn!("Process {} not found", pid);
     }
 
-    // Clean up PID file
     let _ = fs::remove_file(PID_FILE);
 
     Ok(())
@@ -287,12 +264,14 @@ fn is_csv_file(path: &Path) -> bool {
         && !path
             .file_name()
             .map_or(false, |n| n.to_string_lossy().contains(".done-"))
+        && !path
+            .file_name()
+            .map_or(false, |n| n.to_string_lossy().contains(".result.csv"))
 }
 
 async fn process_file(
     path: &Path,
     batch_name: &str,
-    db: Arc<Database>,
     adspower: Option<Arc<AdsPowerClient>>,
     exe_path: &PathBuf,
     backend: &str,
@@ -301,14 +280,13 @@ async fn process_file(
     permit_tx: async_channel::Sender<usize>,
     enable_screenshot: bool,
 ) -> Result<()> {
-    let accounts = read_accounts_from_csv(path.to_str().unwrap()).await?;
+    // Read accounts and original records/headers
+    let (accounts, records, headers) = read_accounts_from_csv(path.to_str().unwrap()).await?;
     info!("Read {} accounts from {}", accounts.len(), batch_name);
-
-    db.insert_accounts(&accounts, Some(batch_name)).await?;
 
     let mut handles = Vec::new();
 
-    for account in accounts {
+    for (index, account) in accounts.iter().enumerate() {
         let thread_index = permit_rx.recv().await.unwrap();
 
         let exe_path = exe_path.clone();
@@ -319,7 +297,6 @@ async fn process_file(
 
         let adspower = adspower.clone();
         let permit_tx = permit_tx.clone();
-        let db = db.clone();
 
         let handle = tokio::spawn(async move {
             info!(
@@ -327,23 +304,16 @@ async fn process_file(
                 username, thread_index
             );
 
-            // Handle AdsPower lifecycle if enabled
             let mut adspower_id = None;
             let mut active_remote_url = remote_url_str.clone();
 
             if let Some(client) = &adspower {
                 match client.ensure_profile_for_thread(thread_index).await {
                     Ok(id) => {
-                        info!(
-                            "Using AdsPower profile {} (thread {}) for {}",
-                            id, thread_index, username
-                        );
-
-                        // Update profile settings (clear cookies/cache logic inside)
                         if let Err(e) = client.update_profile_for_account(&id, &username).await {
                             error!("Failed to update AdsPower profile for {}: {}", username, e);
                             let _ = permit_tx.send(thread_index).await;
-                            return;
+                            return (index, None);
                         }
 
                         match client.start_browser(&id).await {
@@ -354,7 +324,7 @@ async fn process_file(
                             Err(e) => {
                                 error!("Failed to start AdsPower browser for {}: {}", username, e);
                                 let _ = permit_tx.send(thread_index).await;
-                                return; // Skip this worker
+                                return (index, None);
                             }
                         }
                     }
@@ -364,7 +334,7 @@ async fn process_file(
                             thread_index, e
                         );
                         let _ = permit_tx.send(thread_index).await;
-                        return; // Skip this worker
+                        return (index, None);
                     }
                 }
             }
@@ -384,51 +354,87 @@ async fn process_file(
                 cmd.arg("--enable-screenshot");
             }
 
-            let status = cmd.status().await;
+            // Capture output
+            let output = cmd.output().await;
 
-            // Cleanup AdsPower
             if let Some(client) = &adspower {
                 if let Some(id) = adspower_id {
                     let _ = client.stop_browser(&id).await;
                 }
             }
 
-            match status {
-                Ok(s) if s.success() => {
-                    info!("Worker for {} completed successfully", username);
-                    // Check DB for detailed result
-                    match db.get_account(&username).await {
-                        Ok(Some(account)) => {
-                            info!(
-                                "Worker result for {}: Success={:?}, Captcha={:?}, 2FA={:?}",
-                                username, account.success, account.captcha, account.two_fa
-                            );
-                        }
-                        Ok(None) => {
-                            warn!("Worker finished but account {} not found in DB", username);
-                        }
-                        Err(e) => {
-                            error!("Failed to fetch account status for {}: {}", username, e);
+            let _ = permit_tx.send(thread_index).await;
+
+            match output {
+                Ok(out) => {
+                    let stdout = String::from_utf8_lossy(&out.stdout);
+                    // Find JSON result
+                    for line in stdout.lines() {
+                        if let Some(json_str) = line.strip_prefix("RESULT_JSON:") {
+                            if let Ok(result) = serde_json::from_str::<WorkerResult>(json_str) {
+                                return (index, Some(result));
+                            }
                         }
                     }
-                }
-                Ok(s) => {
-                    error!("Worker for {} exited with error status: {}", username, s);
+                    error!("Worker for {} did not return valid JSON result", username);
+                    (index, None)
                 }
                 Err(e) => {
-                    error!("Failed to spawn worker for {}: {}", username, e);
+                    error!("Failed to run worker for {}: {}", username, e);
+                    (index, None)
                 }
             }
-
-            let _ = permit_tx.send(thread_index).await;
         });
 
         handles.push(handle);
     }
 
+    let mut results = Vec::new();
     for handle in handles {
-        let _ = handle.await;
+        if let Ok(res) = handle.await {
+            results.push(res);
+        }
     }
+
+    // Sort by index to maintain original order
+    results.sort_by_key(|k| k.0);
+
+    // Create result CSV
+    let result_filename = format!("{}.result.csv", path.file_stem().unwrap().to_str().unwrap());
+    let result_path = path.parent().unwrap().join(result_filename);
+
+    let mut wtr = csv::Writer::from_path(&result_path)?;
+
+    // Write Headers
+    let mut new_headers = headers.clone();
+    new_headers.push_field("Status");
+    new_headers.push_field("Captcha");
+    new_headers.push_field("2FA");
+    new_headers.push_field("Message");
+    wtr.write_record(&new_headers)?;
+
+    for (idx, worker_res_opt) in results {
+        if let Some(record) = records.get(idx) {
+            let mut new_record = record.clone();
+
+            if let Some(res) = worker_res_opt {
+                new_record.push_field(&res.status);
+                new_record.push_field(&res.captcha);
+                new_record.push_field(&res.two_fa);
+                new_record.push_field(&res.message);
+            } else {
+                // Default failure if no result returned
+                new_record.push_field("System Error");
+                new_record.push_field("Unknown");
+                new_record.push_field("Unknown");
+                new_record.push_field("Worker execution failed");
+            }
+            wtr.write_record(&new_record)?;
+        }
+    }
+
+    wtr.flush()?;
+    info!("Results written to {:?}", result_path);
 
     Ok(())
 }
