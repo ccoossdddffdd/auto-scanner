@@ -1,5 +1,6 @@
 use crate::adspower::AdsPowerClient;
 use crate::csv_reader::read_accounts_from_csv;
+use crate::email_monitor::EmailConfig;
 use crate::email_monitor::EmailMonitor;
 use crate::excel_handler::{read_accounts_from_excel, write_results_to_excel};
 use crate::file_tracker::FileTracker;
@@ -10,15 +11,17 @@ use chrono::Local;
 use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use crate::email_monitor::EmailConfig;
 use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::Arc;
+use tokio::process::Command;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+const PID_FILE: &str = "auto-scanner-master.pid";
 
 #[derive(Clone)]
 pub struct MasterConfig {
@@ -31,6 +34,7 @@ pub struct MasterConfig {
     pub status: bool,
     pub enable_email_monitor: bool,
     pub email_poll_interval: u64,
+    pub exe_path: Option<PathBuf>,
 }
 
 #[derive(Clone)]
@@ -41,12 +45,13 @@ pub struct ProcessConfig {
     pub remote_url: String,
     pub exe_path: PathBuf,
     pub enable_screenshot: bool,
+    pub doned_dir: PathBuf,
 }
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-
-const PID_FILE: &str = "auto-scanner-master.pid";
 
 pub async fn run(input_dir: Option<String>, config: MasterConfig) -> Result<()> {
+    // Load .env file
+    dotenv::dotenv().ok();
+
     if config.status {
         return check_status();
     }
@@ -105,6 +110,12 @@ pub async fn run(input_dir: Option<String>, config: MasterConfig) -> Result<()> 
         fs::create_dir_all(&input_path).context("Failed to create monitoring directory")?;
     }
 
+    let doned_dir =
+        PathBuf::from(std::env::var("DONED_DIR").unwrap_or_else(|_| "input/doned".to_string()));
+    if !doned_dir.exists() {
+        fs::create_dir_all(&doned_dir).context("Failed to create doned directory")?;
+    }
+
     let (tx, mut rx) = mpsc::channel::<PathBuf>(100);
     let processing_files = Arc::new(std::sync::Mutex::new(HashSet::new()));
 
@@ -149,7 +160,7 @@ pub async fn run(input_dir: Option<String>, config: MasterConfig) -> Result<()> 
     watcher.watch(&input_path, RecursiveMode::NonRecursive)?;
 
     // 启动邮件监控（如果启用）
-    if config.enable_email_monitor {
+    let email_monitor_instance = if config.enable_email_monitor {
         info!("Email monitoring enabled");
 
         let file_tracker = Arc::new(FileTracker::new());
@@ -164,30 +175,35 @@ pub async fn run(input_dir: Option<String>, config: MasterConfig) -> Result<()> 
             }
         };
 
-        let email_monitor = match EmailMonitor::new(email_config, file_tracker.clone()) {
-            Ok(monitor) => monitor,
+        match EmailMonitor::new(email_config, file_tracker.clone()) {
+            Ok(monitor) => {
+                let monitor = Arc::new(monitor);
+                // 启动邮件监控任务
+                let monitor_clone = monitor.clone();
+                let monitor_handle = tokio::spawn(async move {
+                    info!("Email monitor task started");
+                    if let Err(e) = monitor_clone.start_monitoring().await {
+                        error!("Email monitor failed: {}", e);
+                    }
+                });
+
+                info!(
+                    "Email monitor task spawned (handle: {:?})",
+                    monitor_handle.id()
+                );
+                Some(monitor)
+            }
             Err(e) => {
                 warn!(
                     "Failed to create email monitor: {}, disabling email monitoring",
                     e
                 );
-                return Ok(());
+                None
             }
-        };
-
-        // 启动邮件监控任务
-        let monitor_handle = tokio::spawn(async move {
-            info!("Email monitor task started");
-            if let Err(e) = email_monitor.start_monitoring().await {
-                error!("Email monitor failed: {}", e);
-            }
-        });
-
-        info!(
-            "Email monitor task spawned (handle: {:?})",
-            monitor_handle.id()
-        );
-    }
+        }
+    } else {
+        None
+    };
 
     let (permit_tx, permit_rx) = async_channel::bounded(config.thread_count);
     for i in 0..config.thread_count {
@@ -197,7 +213,11 @@ pub async fn run(input_dir: Option<String>, config: MasterConfig) -> Result<()> 
             .expect("Failed to initialize thread pool");
     }
 
-    let exe_path = env::current_exe().context("Failed to get current executable path")?;
+    let exe_path = if let Some(path) = config.exe_path.clone() {
+        path
+    } else {
+        env::current_exe().context("Failed to get current executable path")?
+    };
 
     info!("Waiting for new files...");
 
@@ -235,6 +255,7 @@ pub async fn run(input_dir: Option<String>, config: MasterConfig) -> Result<()> 
                     remote_url: config.remote_url.clone(),
                     exe_path: exe_path.clone(),
                     enable_screenshot: config.enable_screenshot,
+                    doned_dir: doned_dir.clone(),
                 };
 
                 let result = process_file(
@@ -243,6 +264,7 @@ pub async fn run(input_dir: Option<String>, config: MasterConfig) -> Result<()> 
                     process_config,
                     permit_rx.clone(),
                     permit_tx.clone(),
+                    email_monitor_instance.clone(),
                 )
                 .await;
 
@@ -252,9 +274,8 @@ pub async fn run(input_dir: Option<String>, config: MasterConfig) -> Result<()> 
                 }
 
                 match result {
-                    Ok(_) => {
-                        info!("Finished processing file: {:?}", csv_path);
-                        rename_processed_file(&csv_path)?;
+                    Ok(processed_path) => {
+                        info!("Finished processing file: {:?}", processed_path);
                     }
                     Err(e) => {
                         error!("Error processing file {:?}: {}", csv_path, e);
@@ -351,7 +372,8 @@ async fn process_file(
     config: ProcessConfig,
     permit_rx: async_channel::Receiver<usize>,
     permit_tx: async_channel::Sender<usize>,
-) -> Result<()> {
+    email_monitor: Option<Arc<EmailMonitor>>,
+) -> Result<PathBuf> {
     let extension = path
         .extension()
         .and_then(|e| e.to_str())
@@ -363,6 +385,14 @@ async fn process_file(
     // Handle TXT to CSV conversion
     let path_to_process = if is_txt {
         let new_path = convert_txt_to_csv(path).await?;
+
+        // Update file tracker mapping
+        if let Some(monitor) = &email_monitor {
+            if let Err(e) = monitor.get_file_tracker().update_file_path(path, &new_path) {
+                warn!("Failed to update file tracker path: {}", e);
+            }
+        }
+
         // We delete the original txt file as requested
         fs::remove_file(path).context("Failed to remove original TXT file")?;
         info!("Converted {:?} to CSV and removed original", path);
@@ -371,214 +401,267 @@ async fn process_file(
         path.to_path_buf()
     };
 
-    // Read accounts and original records/headers
-    let (accounts, records, headers) = if is_excel {
-        read_accounts_from_excel(&path_to_process)?
+    // Lookup Email ID
+    let email_id = if let Some(monitor) = &email_monitor {
+        let filename = path_to_process
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+        monitor.get_file_tracker().find_email_by_file(filename)
     } else {
-        read_accounts_from_csv(path_to_process.to_str().unwrap()).await?
+        None
     };
 
-    info!("Read {} accounts from {}", accounts.len(), batch_name);
+    let processing_result = async {
+        // Read accounts and original records/headers
+        let (accounts, records, headers) = if is_excel {
+            read_accounts_from_excel(&path_to_process)?
+        } else {
+            read_accounts_from_csv(path_to_process.to_str().unwrap()).await?
+        };
 
-    let mut handles = Vec::new();
+        info!("Read {} accounts from {}", accounts.len(), batch_name);
 
-    for (index, account) in accounts.iter().enumerate() {
-        let thread_index = permit_rx.recv().await.unwrap();
+        let mut handles = Vec::new();
 
-        let exe_path = config.exe_path.clone();
-        let username = account.username.clone();
-        let password = account.password.clone();
-        let backend_str = config.backend.clone();
-        let remote_url_str = config.remote_url.clone();
+        for (index, account) in accounts.iter().enumerate() {
+            let thread_index = permit_rx.recv().await.unwrap();
 
-        let adspower = config.adspower.clone();
-        let permit_tx = permit_tx.clone();
+            let exe_path = config.exe_path.clone();
+            let username = account.username.clone();
+            let password = account.password.clone();
+            let backend_str = config.backend.clone();
+            let remote_url_str = config.remote_url.clone();
 
-        let handle = tokio::spawn(async move {
-            info!(
-                "Spawning worker for {} on thread {}",
-                username, thread_index
-            );
+            let adspower = config.adspower.clone();
+            let permit_tx = permit_tx.clone();
 
-            let mut adspower_id = None;
-            let mut active_remote_url = remote_url_str.clone();
+            let handle = tokio::spawn(async move {
+                info!(
+                    "Spawning worker for {} on thread {}",
+                    username, thread_index
+                );
 
-            if let Some(client) = &adspower {
-                match client.ensure_profile_for_thread(thread_index).await {
-                    Ok(id) => {
-                        if let Err(e) = client.update_profile_for_account(&id, &username).await {
-                            error!("Failed to update AdsPower profile for {}: {}", username, e);
-                            let _ = permit_tx.send(thread_index).await;
-                            return (index, None);
-                        }
+                let mut adspower_id = None;
+                let mut active_remote_url = remote_url_str.clone();
 
-                        match client.start_browser(&id).await {
-                            Ok(ws_url) => {
-                                adspower_id = Some(id);
-                                active_remote_url = ws_url;
-                            }
-                            Err(e) => {
-                                error!("Failed to start AdsPower browser for {}: {}", username, e);
+                if let Some(client) = &adspower {
+                    match client.ensure_profile_for_thread(thread_index).await {
+                        Ok(id) => {
+                            if let Err(e) = client.update_profile_for_account(&id, &username).await
+                            {
+                                error!("Failed to update AdsPower profile for {}: {}", username, e);
                                 let _ = permit_tx.send(thread_index).await;
                                 return (index, None);
                             }
-                        }
-                    }
-                    Err(e) => {
-                        error!(
-                            "Failed to check/create AdsPower profile for thread {}: {}",
-                            thread_index, e
-                        );
-                        let _ = permit_tx.send(thread_index).await;
-                        return (index, None);
-                    }
-                }
-            }
 
-            let mut cmd = Command::new(exe_path);
-            cmd.arg("worker")
-                .arg("--username")
-                .arg(&username)
-                .arg("--password")
-                .arg(&password)
-                .arg("--remote-url")
-                .arg(&active_remote_url)
-                .arg("--backend")
-                .arg(&backend_str);
-
-            if config.enable_screenshot {
-                cmd.arg("--enable-screenshot");
-            }
-
-            // Capture output
-            let output = cmd.output();
-
-            if let Some(client) = &adspower {
-                if let Some(id) = adspower_id {
-                    let _ = client.stop_browser(&id).await;
-                }
-            }
-
-            let _ = permit_tx.send(thread_index).await;
-
-            match output {
-                Ok(out) => {
-                    let stdout = String::from_utf8_lossy(&out.stdout);
-                    // Find JSON result
-                    for line in stdout.lines() {
-                        if let Some(json_str) = line.strip_prefix("RESULT_JSON:") {
-                            if let Ok(result) = serde_json::from_str::<WorkerResult>(json_str) {
-                                return (index, Some(result));
+                            match client.start_browser(&id).await {
+                                Ok(ws_url) => {
+                                    adspower_id = Some(id);
+                                    active_remote_url = ws_url;
+                                }
+                                Err(e) => {
+                                    error!(
+                                        "Failed to start AdsPower browser for {}: {}",
+                                        username, e
+                                    );
+                                    let _ = permit_tx.send(thread_index).await;
+                                    return (index, None);
+                                }
                             }
                         }
+                        Err(e) => {
+                            error!(
+                                "Failed to check/create AdsPower profile for thread {}: {}",
+                                thread_index, e
+                            );
+                            let _ = permit_tx.send(thread_index).await;
+                            return (index, None);
+                        }
                     }
-                    error!("Worker for {} did not return valid JSON result", username);
-                    (index, None)
+                }
+
+                let mut cmd = Command::new(exe_path);
+                cmd.arg("worker")
+                    .arg("--username")
+                    .arg(&username)
+                    .arg("--password")
+                    .arg(&password)
+                    .arg("--remote-url")
+                    .arg(&active_remote_url)
+                    .arg("--backend")
+                    .arg(&backend_str);
+
+                if config.enable_screenshot {
+                    cmd.arg("--enable-screenshot");
+                }
+
+                // Capture output
+                let output = cmd.output().await;
+
+                if let Some(client) = &adspower {
+                    if let Some(id) = adspower_id {
+                        let _ = client.stop_browser(&id).await;
+                    }
+                }
+
+                let _ = permit_tx.send(thread_index).await;
+
+                match output {
+                    Ok(out) => {
+                        let stdout = String::from_utf8_lossy(&out.stdout);
+                        // Find JSON result
+                        for line in stdout.lines() {
+                            if let Some(json_str) = line.strip_prefix("RESULT_JSON:") {
+                                if let Ok(result) = serde_json::from_str::<WorkerResult>(json_str) {
+                                    return (index, Some(result));
+                                }
+                            }
+                        }
+                        error!("Worker for {} did not return valid JSON result", username);
+                        (index, None)
+                    }
+                    Err(e) => {
+                        error!("Failed to run worker for {}: {}", username, e);
+                        (index, None)
+                    }
+                }
+            });
+
+            handles.push(handle);
+        }
+
+        let mut results = Vec::new();
+        for handle in handles {
+            if let Ok(res) = handle.await {
+                results.push(res);
+            }
+        }
+
+        // Sort by index to maintain original order
+        results.sort_by_key(|k| k.0);
+
+        // Overwrite the original file
+        if is_excel {
+            // Write Headers
+            let mut new_headers = headers.clone();
+            new_headers.push("状态".to_string());
+            new_headers.push("验证码".to_string());
+            new_headers.push("2FA".to_string());
+            new_headers.push("信息".to_string());
+
+            let mut new_records = Vec::new();
+            for (idx, worker_res_opt) in results {
+                if let Some(record) = records.get(idx) {
+                    let mut new_record = record.clone();
+                    if let Some(res) = worker_res_opt {
+                        new_record.push(res.status);
+                        new_record.push(res.captcha);
+                        new_record.push(res.two_fa);
+                        new_record.push(res.message);
+                    } else {
+                        new_record.push("系统错误".to_string());
+                        new_record.push("未知".to_string());
+                        new_record.push("未知".to_string());
+                        new_record.push("Worker 执行失败".to_string());
+                    }
+                    new_records.push(new_record);
+                }
+            }
+            write_results_to_excel(&path_to_process, &new_headers, &new_records)?;
+        } else {
+            let mut wtr = csv::Writer::from_path(&path_to_process)?;
+
+            // Write Headers
+            let mut new_headers = headers.clone();
+            new_headers.push("状态".to_string());
+            new_headers.push("验证码".to_string());
+            new_headers.push("2FA".to_string());
+            new_headers.push("信息".to_string());
+            wtr.write_record(&new_headers)?;
+
+            for (idx, worker_res_opt) in results {
+                if let Some(record) = records.get(idx) {
+                    let mut new_record = record.clone();
+
+                    if let Some(res) = worker_res_opt {
+                        new_record.push(res.status);
+                        new_record.push(res.captcha);
+                        new_record.push(res.two_fa);
+                        new_record.push(res.message);
+                    } else {
+                        // Default failure if no result returned
+                        new_record.push("系统错误".to_string());
+                        new_record.push("未知".to_string());
+                        new_record.push("未知".to_string());
+                        new_record.push("Worker 执行失败".to_string());
+                    }
+                    wtr.write_record(&new_record)?;
+                }
+            }
+            wtr.flush()?;
+        }
+
+        info!("Results written back to {:?}", path_to_process);
+
+        if extension == "xls" {
+            // The write_results_to_excel function writes XLSX format.
+            // If we passed a .xls path, the file content is now XLSX but extension is .xls.
+            // We should rename it to .xlsx
+            let new_xlsx_path = path_to_process.with_extension("xlsx");
+            fs::rename(&path_to_process, &new_xlsx_path)
+                .context("Failed to rename .xls to .xlsx")?;
+            info!("Renamed processed .xls to .xlsx: {:?}", new_xlsx_path);
+            // Original .xls is effectively "deleted" (replaced/renamed)
+            rename_processed_file(&new_xlsx_path, &config.doned_dir)
+        } else {
+            rename_processed_file(&path_to_process, &config.doned_dir)
+        }
+    }
+    .await;
+
+    // Handle Notifications
+    if let Some(monitor) = &email_monitor {
+        if let Some(id) = email_id {
+            let metadata = monitor.get_file_tracker().get_email_metadata(&id);
+            let from = metadata.map(|m| m.from).unwrap_or_default();
+
+            match &processing_result {
+                Ok(final_path) => {
+                    info!("Sending success notification to {}", from);
+                    if let Err(e) = monitor
+                        .send_success_notification(&from, final_path.clone())
+                        .await
+                    {
+                        error!("Failed to send success notification: {}", e);
+                    }
+                    if let Err(e) = monitor
+                        .get_file_tracker()
+                        .mark_success(&id, final_path.clone())
+                    {
+                        warn!("Failed to mark success in tracker: {}", e);
+                    }
                 }
                 Err(e) => {
-                    error!("Failed to run worker for {}: {}", username, e);
-                    (index, None)
+                    info!("Sending failure notification to {}", from);
+                    if let Err(e) = monitor
+                        .send_failure_notification(&from, &e.to_string(), None)
+                        .await
+                    {
+                        error!("Failed to send failure notification: {}", e);
+                    }
+                    if let Err(e) = monitor
+                        .get_file_tracker()
+                        .mark_failed(&id, e.to_string(), None)
+                    {
+                        warn!("Failed to mark failed in tracker: {}", e);
+                    }
                 }
             }
-        });
-
-        handles.push(handle);
-    }
-
-    let mut results = Vec::new();
-    for handle in handles {
-        if let Ok(res) = handle.await {
-            results.push(res);
         }
     }
 
-    // Sort by index to maintain original order
-    results.sort_by_key(|k| k.0);
-
-    // Overwrite the original file
-    if is_excel {
-        // Write Headers
-        let mut new_headers = headers.clone();
-        new_headers.push("状态".to_string());
-        new_headers.push("验证码".to_string());
-        new_headers.push("2FA".to_string());
-        new_headers.push("信息".to_string());
-
-        let mut new_records = Vec::new();
-        for (idx, worker_res_opt) in results {
-            if let Some(record) = records.get(idx) {
-                let mut new_record = record.clone();
-                if let Some(res) = worker_res_opt {
-                    new_record.push(res.status);
-                    new_record.push(res.captcha);
-                    new_record.push(res.two_fa);
-                    new_record.push(res.message);
-                } else {
-                    new_record.push("系统错误".to_string());
-                    new_record.push("未知".to_string());
-                    new_record.push("未知".to_string());
-                    new_record.push("Worker 执行失败".to_string());
-                }
-                new_records.push(new_record);
-            }
-        }
-        write_results_to_excel(path, &new_headers, &new_records)?;
-    } else {
-        let mut wtr = csv::Writer::from_path(path)?;
-
-        // Write Headers
-        let mut new_headers = headers.clone();
-        new_headers.push("状态".to_string());
-        new_headers.push("验证码".to_string());
-        new_headers.push("2FA".to_string());
-        new_headers.push("信息".to_string());
-        wtr.write_record(&new_headers)?;
-
-        for (idx, worker_res_opt) in results {
-            if let Some(record) = records.get(idx) {
-                let mut new_record = record.clone();
-
-                if let Some(res) = worker_res_opt {
-                    new_record.push(res.status);
-                    new_record.push(res.captcha);
-                    new_record.push(res.two_fa);
-                    new_record.push(res.message);
-                } else {
-                    // Default failure if no result returned
-                    new_record.push("系统错误".to_string());
-                    new_record.push("未知".to_string());
-                    new_record.push("未知".to_string());
-                    new_record.push("Worker 执行失败".to_string());
-                }
-                wtr.write_record(&new_record)?;
-            }
-        }
-        wtr.flush()?;
-    }
-
-    info!("Results written back to {:?}", path_to_process);
-
-    // If it was an xls file, we need to delete it as we saved a new .xlsx file (implied by write_results_to_excel)
-    // Wait, write_results_to_excel overwrites if path is same, OR creates new if we changed extension?
-    // In excel_handler, we used Workbook::save(path). If path was .xls, rust_xlsxwriter might fail or just write zip content to .xls file.
-    // rust_xlsxwriter strictly writes xlsx format.
-    // If input was .xls, and we passed that path to save(), it overwrote .xls with .xlsx content but kept .xls extension?
-    // That's confusing. We should probably rename it to .xlsx if it was .xls.
-
-    if extension == "xls" {
-        // The write_results_to_excel function writes XLSX format.
-        // If we passed a .xls path, the file content is now XLSX but extension is .xls.
-        // We should rename it to .xlsx
-        let new_xlsx_path = path_to_process.with_extension("xlsx");
-        fs::rename(&path_to_process, &new_xlsx_path).context("Failed to rename .xls to .xlsx")?;
-        info!("Renamed processed .xls to .xlsx: {:?}", new_xlsx_path);
-        // Original .xls is effectively "deleted" (replaced/renamed)
-        rename_processed_file(&new_xlsx_path)?;
-    } else {
-        rename_processed_file(&path_to_process)?;
-    }
-
-    Ok(())
+    processing_result
 }
 
 async fn convert_txt_to_csv(path: &Path) -> Result<PathBuf> {
@@ -602,18 +685,16 @@ async fn convert_txt_to_csv(path: &Path) -> Result<PathBuf> {
     Ok(csv_path)
 }
 
-fn rename_processed_file(path: &Path) -> Result<()> {
+fn rename_processed_file(path: &Path, doned_dir: &Path) -> Result<PathBuf> {
     let now = Local::now().format("%Y%m%d-%H%M%S");
     let file_name = path
         .file_stem()
         .and_then(|s| s.to_str())
         .context("Invalid filename")?;
 
-    let parent = path.parent().context("Invalid file path")?;
-    let doned_dir = parent.join("doned");
-
+    // We use the provided doned_dir instead of assuming it's in the parent directory
     if !doned_dir.exists() {
-        fs::create_dir_all(&doned_dir).context("Failed to create doned directory")?;
+        fs::create_dir_all(doned_dir).context("Failed to create doned directory")?;
     }
 
     let new_name = format!("{}.done-{}.csv", file_name, now);
@@ -621,5 +702,5 @@ fn rename_processed_file(path: &Path) -> Result<()> {
 
     fs::rename(path, &new_path).context("Failed to move processed file to doned directory")?;
     info!("Moved processed file to {:?}", new_path);
-    Ok(())
+    Ok(new_path)
 }

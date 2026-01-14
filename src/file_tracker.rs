@@ -1,7 +1,7 @@
 use anyhow::Result;
 use chrono::{DateTime, Local};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 /// 处理状态枚举
@@ -141,6 +141,29 @@ impl FileTracker {
                 processed_file,
             },
         );
+        Ok(())
+    }
+
+    /// 更新文件路径映射（用于文件转换，如 txt -> csv）
+    pub fn update_file_path(&self, old_path: &Path, new_path: &Path) -> Result<()> {
+        let mut mapping = self.file_to_email.lock().unwrap();
+
+        let old_filename = old_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+
+        let new_filename = new_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+
+        if let Some(email_id) = mapping.remove(&old_filename) {
+            mapping.insert(new_filename, email_id);
+        }
+
         Ok(())
     }
 

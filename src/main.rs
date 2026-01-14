@@ -73,6 +73,7 @@ fn main() -> Result<()> {
                 status,
                 enable_email_monitor,
                 email_poll_interval,
+                exe_path: None,
             };
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(async { master::run(input, config).await })?;

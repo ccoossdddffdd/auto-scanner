@@ -1,4 +1,4 @@
-use crate::browser::{playwright_adapter::PlaywrightAdapter, BrowserAdapter};
+use crate::browser::{playwright_adapter::PlaywrightAdapter, mock_adapter::MockBrowserAdapter, BrowserAdapter};
 use crate::models::{Account, WorkerResult};
 use anyhow::{Context, Result};
 use tracing::{error, info};
@@ -29,6 +29,7 @@ pub async fn run(
                 e
             )),
         },
+        "mock" => Ok(Box::new(MockBrowserAdapter::new())),
         _ => Err(anyhow::anyhow!(
             "Unsupported backend in worker: {}",
             backend
