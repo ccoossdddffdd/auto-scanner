@@ -61,6 +61,69 @@ impl AdsPowerClient {
         }
     }
 
+    /// 统一的 API 调用封装
+    async fn call_api<T, R>(&self, method: &str, endpoint: &str, body: Option<T>) -> Result<R>
+    where
+        T: serde::Serialize,
+        R: serde::de::DeserializeOwned,
+    {
+        let url = format!("{}{}", ADSPOWER_API_URL, endpoint);
+
+        let request = match method {
+            "GET" => self.client.get(&url),
+            "POST" => {
+                let mut req = self.client.post(&url);
+                if let Some(data) = body {
+                    req = req.json(&data);
+                }
+                req
+            }
+            _ => anyhow::bail!("Unsupported HTTP method: {}", method),
+        };
+
+        let response = request
+            .send()
+            .await
+            .context(format!("Failed to call AdsPower API: {}", endpoint))?;
+
+        let resp: ApiResponse<R> = response.json().await?;
+
+        if resp.code != 0 {
+            anyhow::bail!("AdsPower API error ({}): {}", endpoint, resp.msg);
+        }
+
+        resp.data
+            .context(format!("API {} returned success but no data", endpoint))
+    }
+
+    /// 发送 GET 请求（带查询参数）
+    async fn call_api_with_query<R>(
+        &self,
+        endpoint: &str,
+        query: &[(&str, &str)],
+    ) -> Result<Option<R>>
+    where
+        R: serde::de::DeserializeOwned,
+    {
+        let url = format!("{}{}", ADSPOWER_API_URL, endpoint);
+
+        let response = self
+            .client
+            .get(&url)
+            .query(query)
+            .send()
+            .await
+            .context(format!("Failed to call AdsPower API: {}", endpoint))?;
+
+        let resp: ApiResponse<R> = response.json().await?;
+
+        if resp.code != 0 {
+            anyhow::bail!("AdsPower API error ({}): {}", endpoint, resp.msg);
+        }
+
+        Ok(resp.data)
+    }
+
     pub async fn ensure_profile_for_thread(&self, thread_index: usize) -> Result<String> {
         let profile_name = format!("auto-scanner-worker-{}", thread_index);
 
@@ -83,23 +146,11 @@ impl AdsPowerClient {
     }
 
     async fn find_profile_by_username(&self, username: &str) -> Result<Option<String>> {
-        let url = format!("{}/api/v1/user/list", ADSPOWER_API_URL);
-        let response = self
-            .client
-            .get(&url)
-            .query(&[("page_size", "2000")])
-            .send()
-            .await
-            .context("Failed to list AdsPower profiles")?;
+        let data: Option<ProfileListResponse> = self
+            .call_api_with_query("/api/v1/user/list", &[("page_size", "2000")])
+            .await?;
 
-        let resp: ApiResponse<ProfileListResponse> = response.json().await?;
-
-        if resp.code != 0 {
-            anyhow::bail!("AdsPower API error: {}", resp.msg);
-        }
-
-        if let Some(data) = resp.data {
-            // We assume the username is stored in the 'name' field of the profile
+        if let Some(data) = data {
             for profile in data.list {
                 if let Some(name) = profile.name {
                     if name == username {
@@ -113,110 +164,68 @@ impl AdsPowerClient {
     }
 
     async fn create_profile(&self, username: &str) -> Result<String> {
-        let url = format!("{}/api/v1/user/create", ADSPOWER_API_URL);
         let body = json!({
             "name": username,
             "domain_name": "facebook.com",
             "open_urls": ["https://www.facebook.com"],
         });
 
-        let response = self
-            .client
-            .post(&url)
-            .json(&body)
-            .send()
-            .await
-            .context("Failed to create AdsPower profile")?;
+        let resp: CreateProfileResponse = self
+            .call_api("POST", "/api/v1/user/create", Some(body))
+            .await?;
 
-        let resp: ApiResponse<CreateProfileResponse> = response.json().await?;
-
-        if resp.code != 0 {
-            anyhow::bail!("AdsPower create profile error: {}", resp.msg);
-        }
-
-        resp.data
-            .map(|d| d.id)
-            .context("AdsPower API returned success but no user_id")
+        Ok(resp.id)
     }
 
     pub async fn update_profile_for_account(&self, user_id: &str, username: &str) -> Result<()> {
-        let url = format!("{}/api/v1/user/update", ADSPOWER_API_URL);
-        // Clear cookies/cache by updating with empty cookie and setting name to current user for visibility
         let body = json!({
             "user_id": user_id,
             "name": format!("auto-scanner-{}", username),
             "domain_name": "facebook.com",
-            // TODO: Ideally we should clear cookies here.
-            // Some API versions support clearing by passing empty cookie list or specific flag.
-            // For now, we just update the name to track progress.
-            // Note: Start API supports clear_cache_after_closing which might be useful.
         });
 
-        let response = self
-            .client
-            .post(&url)
-            .json(&body)
-            .send()
-            .await
-            .context("Failed to update AdsPower profile")?;
-
-        let resp: ApiResponse<serde_json::Value> = response.json().await?;
-
-        if resp.code != 0 {
-            anyhow::bail!("AdsPower update profile error: {}", resp.msg);
-        }
+        let _: serde_json::Value = self
+            .call_api("POST", "/api/v1/user/update", Some(body))
+            .await?;
 
         Ok(())
     }
 
     pub async fn start_browser(&self, user_id: &str) -> Result<String> {
-        let url = format!("{}/api/v1/browser/start", ADSPOWER_API_URL);
-        let response = self
-            .client
-            .get(&url)
-            .query(&[
-                ("user_id", user_id),
-                ("clear_cache_after_closing", "1"), // Ensure cache is cleared when stopped
-                ("launch_args", "[\"--incognito\"]"), // Optional: try to force incognito if supported
-            ])
-            .send()
-            .await
-            .context("Failed to start AdsPower browser")?;
+        let data: Option<StartBrowserResponse> = self
+            .call_api_with_query(
+                "/api/v1/browser/start",
+                &[
+                    ("user_id", user_id),
+                    ("clear_cache_after_closing", "1"),
+                    ("launch_args", "[\"--incognito\"]"),
+                ],
+            )
+            .await?;
 
-        let resp: ApiResponse<StartBrowserResponse> = response.json().await?;
-
-        if resp.code != 0 {
-            anyhow::bail!("AdsPower start browser error: {}", resp.msg);
-        }
-
-        let ws_url = resp
-            .data
-            .context("No data in start browser response")?
-            .ws
-            .puppeteer;
+        let ws_url = data
+            .map(|d| d.ws.puppeteer)
+            .context("Failed to get WebSocket URL from start browser response")?;
 
         info!("AdsPower browser started: {}", ws_url);
         Ok(ws_url)
     }
 
     pub async fn stop_browser(&self, user_id: &str) -> Result<()> {
-        let url = format!("{}/api/v1/browser/stop", ADSPOWER_API_URL);
-        let response = self
-            .client
-            .get(&url)
-            .query(&[("user_id", user_id)])
-            .send()
+        let result: Result<serde_json::Value> = self
+            .call_api_with_query("/api/v1/browser/stop", &[("user_id", user_id)])
             .await
-            .context("Failed to stop AdsPower browser")?;
+            .and_then(|data| data.context("No data in stop browser response"));
 
-        let resp: ApiResponse<serde_json::Value> = response.json().await?;
-
-        if resp.code != 0 {
-            warn!("AdsPower stop browser error: {}", resp.msg);
-        } else {
-            info!("AdsPower browser stopped for {}", user_id);
+        match result {
+            Ok(_) => {
+                info!("AdsPower browser stopped for {}", user_id);
+                Ok(())
+            }
+            Err(e) => {
+                warn!("AdsPower stop browser error: {}", e);
+                Ok(())
+            }
         }
-
-        Ok(())
     }
 }

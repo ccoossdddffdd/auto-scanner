@@ -76,6 +76,24 @@ pub struct Attachment {
     pub size: usize,
 }
 
+/// 邮件解析器
+struct EmailParser;
+
+impl EmailParser {
+    fn parse_from_address(parsed: &Message) -> String {
+        parsed
+            .from()
+            .and_then(|l| l.first())
+            .and_then(|a| a.address.as_ref())
+            .map(|s| s.to_string())
+            .unwrap_or_default()
+    }
+
+    fn parse_subject(parsed: &Message) -> String {
+        parsed.subject().unwrap_or("").to_string()
+    }
+}
+
 /// 邮件监控器
 pub struct EmailMonitor {
     config: EmailConfig,
@@ -191,80 +209,110 @@ impl EmailMonitor {
 
     /// 获取并处理单个邮件
     async fn fetch_and_process_email(&self, uid: u32, session: &mut ImapSession) -> Result<()> {
-        // 获取邮件内容（RFC822格式）
-        let email_data = {
-            let mut fetch_stream = session
-                .fetch(uid.to_string(), "RFC822")
-                .await
-                .context("Failed to fetch email")?;
-
-            let mut data = None;
-            if let Some(msg) = fetch_stream.next().await {
-                data = Some(msg.context("Failed to read fetch result")?);
-            }
-            data
-        };
+        let email_data = self.fetch_email_data(uid, session).await?;
 
         if email_data.is_none() {
             warn!("No data returned for email UID {}", uid);
             return Ok(());
         }
 
-        // 解析邮件
         let msg = email_data.unwrap();
         if let Some(raw) = msg.body() {
             let parsed = MessageParser::default()
                 .parse(raw)
                 .context("Failed to parse email")?;
 
-            // 获取邮件基本信息
-            let from = parsed
-                .from()
-                .and_then(|l| l.first())
-                .and_then(|a| a.address.as_ref())
-                .map(|s| s.to_string())
-                .unwrap_or_default();
-            let subject = parsed.subject().unwrap_or("").to_string();
-
-            info!("Processing email from: {}, subject: {}", from, subject);
-
-            // 检查是否包含关键词
-            if !subject.contains(&self.config.subject_filter) {
-                info!(
-                    "Email subject does not contain '{}', skipping",
-                    self.config.subject_filter
-                );
-                return Ok(());
-            }
-
-            // 注册邮件到追踪器
-            self.file_tracker.register_email(&uid.to_string())?;
-
-            // 提取附件
-            let attachments = self.extract_attachments(&parsed)?;
-
-            if attachments.is_empty() {
-                info!("Email has no valid attachments");
-                self.handle_no_valid_attachments(uid, &from).await?;
-                return Ok(());
-            }
-
-            // 立即回复"已收到"
-            self.send_received_confirmation(&from).await?;
-
-            // 下载所有有效附件
-            for attachment in &attachments {
-                let _ = self.download_attachment(uid, attachment, &from).await?;
-            }
-
-            // 标记邮件已读并移动到"已处理"文件夹
-            self.mark_and_move_email(uid, session).await?;
-
-            Ok(())
+            self.process_email_workflow(uid, &parsed, session).await?;
         } else {
             warn!("Unexpected fetch result type for email UID {}", uid);
-            Ok(())
         }
+
+        Ok(())
+    }
+
+    /// 获取邮件数据
+    async fn fetch_email_data(
+        &self,
+        uid: u32,
+        session: &mut ImapSession,
+    ) -> Result<Option<async_imap::types::Fetch>> {
+        let mut fetch_stream = session
+            .fetch(uid.to_string(), "RFC822")
+            .await
+            .context("Failed to fetch email")?;
+
+        let mut data = None;
+        if let Some(msg) = fetch_stream.next().await {
+            data = Some(msg.context("Failed to read fetch result")?);
+        }
+
+        Ok(data)
+    }
+
+    /// 处理邮件工作流
+    async fn process_email_workflow(
+        &self,
+        uid: u32,
+        parsed: &Message<'_>,
+        session: &mut ImapSession,
+    ) -> Result<()> {
+        let from = EmailParser::parse_from_address(parsed);
+        let subject = EmailParser::parse_subject(parsed);
+
+        info!("Processing email from: {}, subject: {}", from, subject);
+
+        // 检查主题过滤
+        if !self.should_process_email(&subject) {
+            info!(
+                "Email subject does not contain '{}', skipping",
+                self.config.subject_filter
+            );
+            return Ok(());
+        }
+
+        // 注册邮件
+        self.file_tracker.register_email(&uid.to_string())?;
+
+        // 处理附件
+        self.process_attachments(uid, parsed, &from, session)
+            .await?;
+
+        Ok(())
+    }
+
+    /// 检查是否应该处理该邮件
+    fn should_process_email(&self, subject: &str) -> bool {
+        subject.contains(&self.config.subject_filter)
+    }
+
+    /// 处理附件
+    async fn process_attachments(
+        &self,
+        uid: u32,
+        parsed: &Message<'_>,
+        from: &str,
+        session: &mut ImapSession,
+    ) -> Result<()> {
+        let attachments = self.extract_attachments(parsed)?;
+
+        if attachments.is_empty() {
+            info!("Email has no valid attachments");
+            self.handle_no_valid_attachments(uid, from).await?;
+            return Ok(());
+        }
+
+        // 立即回复"已收到"
+        self.send_received_confirmation(from).await?;
+
+        // 下载所有有效附件
+        for attachment in &attachments {
+            let _ = self.download_attachment(uid, attachment, from).await?;
+        }
+
+        // 标记邮件已读并移动到"已处理"文件夹
+        self.mark_and_move_email(uid, session).await?;
+
+        Ok(())
     }
 
     /// 提取附件
@@ -277,24 +325,29 @@ impl EmailMonitor {
             }
 
             if let Some(filename) = part.attachment_name() {
-                if self.is_valid_attachment(filename) {
-                    let content_type = if let Some(subtype) = part.content_type().unwrap().subtype()
-                    {
-                        format!("{}/{}", part.content_type().unwrap().c_type, subtype)
-                    } else {
-                        part.content_type().unwrap().c_type.to_string()
-                    };
-
-                    let data = part.contents().to_vec();
-
-                    let attachment = Attachment {
-                        filename: filename.to_string(),
-                        content_type,
-                        data,
-                        size: part.body.len(),
-                    };
-                    attachments.push(attachment);
+                if !self.is_valid_attachment(filename) {
+                    continue;
                 }
+
+                // 安全获取 content_type
+                let content_type = part
+                    .content_type()
+                    .map(|ct| {
+                        if let Some(subtype) = ct.subtype() {
+                            format!("{}/{}", ct.c_type, subtype)
+                        } else {
+                            ct.c_type.to_string()
+                        }
+                    })
+                    .unwrap_or_else(|| "application/octet-stream".to_string());
+
+                let attachment = Attachment {
+                    filename: filename.to_string(),
+                    content_type,
+                    data: part.contents().to_vec(),
+                    size: part.body.len(),
+                };
+                attachments.push(attachment);
             }
         }
 

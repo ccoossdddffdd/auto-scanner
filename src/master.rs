@@ -32,6 +32,82 @@ pub struct MasterConfig {
     pub exe_path: Option<PathBuf>,
 }
 
+/// 文件处理器
+struct FileProcessor {
+    adspower: Option<Arc<AdsPowerClient>>,
+    backend: String,
+    remote_url: String,
+    exe_path: PathBuf,
+    enable_screenshot: bool,
+    doned_dir: PathBuf,
+}
+
+impl FileProcessor {
+    fn new(
+        adspower: Option<Arc<AdsPowerClient>>,
+        backend: String,
+        remote_url: String,
+        exe_path: PathBuf,
+        enable_screenshot: bool,
+        doned_dir: PathBuf,
+    ) -> Self {
+        Self {
+            adspower,
+            backend,
+            remote_url,
+            exe_path,
+            enable_screenshot,
+            doned_dir,
+        }
+    }
+
+    async fn process_incoming_file(
+        &self,
+        path: PathBuf,
+        permit_rx: async_channel::Receiver<usize>,
+        permit_tx: async_channel::Sender<usize>,
+        email_monitor: Option<Arc<EmailMonitor>>,
+    ) -> Result<PathBuf> {
+        if !path.exists() {
+            anyhow::bail!("File no longer exists: {:?}", path);
+        }
+
+        info!("Processing file: {:?}", path);
+
+        let batch_name = self.extract_batch_name(&path);
+        let config = self.build_process_config(batch_name.clone());
+
+        process_file(
+            &path,
+            &batch_name,
+            config,
+            permit_rx,
+            permit_tx,
+            email_monitor,
+        )
+        .await
+    }
+
+    fn extract_batch_name(&self, path: &Path) -> String {
+        path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string()
+    }
+
+    fn build_process_config(&self, batch_name: String) -> ProcessConfig {
+        ProcessConfig {
+            batch_name,
+            adspower: self.adspower.clone(),
+            backend: self.backend.clone(),
+            remote_url: self.remote_url.clone(),
+            exe_path: self.exe_path.clone(),
+            enable_screenshot: self.enable_screenshot,
+            doned_dir: self.doned_dir.clone(),
+        }
+    }
+}
+
 fn initialize_logging() -> Result<()> {
     let file_appender = tracing_appender::rolling::daily("logs", "auto-scanner.log");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
@@ -222,6 +298,15 @@ pub async fn run(input_dir: Option<String>, config: MasterConfig) -> Result<()> 
         env::current_exe().context("Failed to get current executable path")?
     };
 
+    let file_processor = FileProcessor::new(
+        adspower.clone(),
+        config.backend.clone(),
+        config.remote_url.clone(),
+        exe_path,
+        config.enable_screenshot,
+        doned_dir.clone(),
+    );
+
     info!("Waiting for new files...");
 
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
@@ -238,38 +323,20 @@ pub async fn run(input_dir: Option<String>, config: MasterConfig) -> Result<()> 
                 break;
             }
             Some(csv_path) = rx.recv() => {
-                 if !csv_path.exists() {
+                if !csv_path.exists() {
                     let mut processing = processing_files.lock().unwrap();
                     processing.remove(&csv_path);
                     continue;
                 }
 
-                info!("Processing file: {:?}", csv_path);
-                let batch_name = csv_path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("unknown")
-                    .to_string();
-
-                let process_config = ProcessConfig {
-                    batch_name: batch_name.clone(),
-                    adspower: adspower.clone(),
-                    backend: config.backend.clone(),
-                    remote_url: config.remote_url.clone(),
-                    exe_path: exe_path.clone(),
-                    enable_screenshot: config.enable_screenshot,
-                    doned_dir: doned_dir.clone(),
-                };
-
-                let result = process_file(
-                    &csv_path,
-                    &batch_name,
-                    process_config,
-                    permit_rx.clone(),
-                    permit_tx.clone(),
-                    email_monitor_instance.clone(),
-                )
-                .await;
+                let result = file_processor
+                    .process_incoming_file(
+                        csv_path.clone(),
+                        permit_rx.clone(),
+                        permit_tx.clone(),
+                        email_monitor_instance.clone(),
+                    )
+                    .await;
 
                 {
                     let mut processing = processing_files.lock().unwrap();

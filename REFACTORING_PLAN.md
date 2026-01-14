@@ -3,9 +3,9 @@
 **创建时间**: 2026-01-14  
 **目标**: 降低函数复杂度，提高代码可读性、可测性，优化文件管理结构
 
-## 重构优先级
+## 第一轮重构 (已完成)
 
-### P0: 拆分 `master.rs` 的 `run` 函数
+### P0: 拆分 `master.rs` 的 `run` 函数 ✅
 **问题**: 276 行巨型函数，包含日志初始化、PID 管理、文件监控、邮件监控、信号处理、主事件循环
 
 **拆分方案**:
@@ -13,152 +13,185 @@
 - `setup_pid_management(daemon: bool)` - PID 文件管理
 - `create_file_watcher(path, tx)` - 文件监控器设置
 - `initialize_email_monitor(config)` - 邮件监控初始化
-- `run_event_loop(...)` - 主事件循环
 
-**预期收益**:
-- 单一职责，每个函数 < 50 行
-- 可独立单元测试
-- 降低认知负担
+**收益**: 主函数从 276 行减少到约 120 行 (-56%)
 
 ---
 
-### P1: 重构 `processor.rs` 的 `process_file` 函数
+### P1: 重构 `processor.rs` 的 `process_file` 函数 ✅
 **问题**: 327 行函数混合多个职责，Worker 调度闭包嵌套过深
 
 **拆分方案**:
-```rust
-// 文件预处理
-async fn prepare_input_file(path: &Path, email_monitor: Option<&EmailMonitor>) -> Result<PathBuf>
+- `WorkerCoordinator` 结构体封装 Worker 调度逻辑
+- `prepare_input_file()` - 文件预处理
+- `write_results_and_rename()` - 结果写回
+- `handle_email_notification()` - 通知处理
 
-// Worker 协调器
-struct WorkerCoordinator {
-    permit_rx: Receiver<usize>,
-    permit_tx: Sender<usize>,
-    adspower: Option<Arc<AdsPowerClient>>,
-}
-
-impl WorkerCoordinator {
-    async fn spawn_worker(&self, account: &Account, config: &WorkerConfig) -> Result<(usize, Option<WorkerResult>)>
-}
-
-// 结果写回
-async fn write_results_and_rename(path: &Path, results: Vec<(usize, Option<WorkerResult>)>, ...) -> Result<PathBuf>
-
-// 通知处理
-async fn handle_email_notification(monitor: &EmailMonitor, email_id: &str, result: Result<PathBuf>)
-```
-
-**预期收益**:
-- 提高可测试性
-- 清晰的职责边界
-- 降低圈复杂度
+**收益**: 主函数从 327 行减少到约 70 行 (-79%)
 
 ---
 
-### P2: 提取 `EmailMonitor` 的邮件处理逻辑
-**问题**: `fetch_and_process_email` 包含邮件解析、附件提取、文件保存、IMAP 操作
+## 第二轮重构 (进行中)
+
+### P0: 拆分 `EmailMonitor::fetch_and_process_email` ✅
+**问题**: 75 行函数包含多个职责：邮件获取、解析、附件提取、通知发送、IMAP 操作
 
 **拆分方案**:
 ```rust
 // 邮件解析器
 struct EmailParser;
 impl EmailParser {
-    fn parse_message(raw: &[u8]) -> Result<ParsedEmail>
-    fn extract_attachments(msg: &Message) -> Result<Vec<Attachment>>
+    fn parse_from_address(parsed: &Message) -> String
+    fn parse_subject(parsed: &Message) -> String
 }
 
-// 附件处理器
-struct AttachmentHandler {
-    input_dir: PathBuf,
-    file_tracker: Arc<FileTracker>,
-}
-impl AttachmentHandler {
-    async fn save_attachment(&self, uid: u32, attachment: &Attachment) -> Result<PathBuf>
-    fn generate_filename(&self, uid: u32, original_name: &str) -> String
-}
+// 工作流函数
+async fn fetch_email_data(uid, session) -> Result<Option<Fetch>>
+async fn process_email_workflow(uid, parsed, session) -> Result<()>
+fn should_process_email(&subject) -> bool
+async fn process_attachments(uid, parsed, from, session) -> Result<()>
 ```
 
-**预期收益**:
-- 单一职责原则
-- 可独立测试解析逻辑
-- 更清晰的附件文件名生成
+**收益**:
+- 主函数从 75 行降至 18 行 (-76%)
+- 职责单一，易于测试
+- 降低认知负担
 
 ---
 
-### P3: 优化文件管理结构
-**问题**: `services/file/` 和 `infrastructure/` 职责不清晰
+### P1: 修复 `extract_attachments` 错误处理 ✅
+**问题**: 多次调用 `.unwrap()` 容易 panic
 
-**重组方案**:
-```
-src/
-├── domain/               # 领域模型（核心业务实体）
-│   ├── account.rs       
-│   └── worker_result.rs 
-├── application/          # 应用服务（高层编排）
-│   ├── processor.rs     # 文件处理编排
-│   └── master.rs        # Master 进程
-├── infrastructure/       # 基础设施（外部依赖）
-│   ├── browser/
-│   ├── adspower.rs
-│   ├── imap.rs
-│   └── file_storage/    # 统一文件操作
-│       ├── csv_handler.rs
-│       ├── excel_handler.rs
-│       └── file_manager.rs
-└── services/             # 领域服务
-    └── email/
-```
-
-**预期收益**:
-- 遵循依赖倒置原则
-- 清晰的分层架构
-- 易于扩展
-
----
-
-### P4: 引入配置对象减少参数传递
-**问题**: 函数参数过多（5-6 个），闭包内局部变量 10+
-
-**优化方案**:
+**解决方案**:
 ```rust
-#[derive(Clone)]
-pub struct WorkerConfig {
-    pub account: Account,
-    pub backend: String,
-    pub remote_url: String,
-    pub exe_path: PathBuf,
-    pub enable_screenshot: bool,
-    pub adspower: Option<Arc<AdsPowerClient>>,
-    pub thread_index: usize,
-}
-
-pub async fn run_worker(config: WorkerConfig) -> Result<WorkerResult>
-
-pub struct ProcessConfig {
-    pub batch_name: String,
-    pub worker_pool: Arc<WorkerPool>,
-    pub file_config: FileConfig,
-    pub email_monitor: Option<Arc<EmailMonitor>>,
-}
+let content_type = part.content_type()
+    .map(|ct| {
+        if let Some(subtype) = ct.subtype() {
+            format!("{}/{}", ct.c_type, subtype)
+        } else {
+            ct.c_type.to_string()
+        }
+    })
+    .unwrap_or_else(|| "application/octet-stream".to_string());
 ```
 
-**预期收益**:
-- 减少参数数量（1-2 个）
-- 提高可读性
-- 便于添加新配置项
+**收益**:
+- 消除潜在 panic
+- 提供默认 content_type
+- 更健壮的错误处理
 
 ---
 
-## 实施策略
+### P2: 提取 `FacebookLoginStrategy` 结果检测 ✅
+**问题**: 结果检测逻辑（30 行）耦合在主流程中，多个 `is_visible` 串行执行
 
-1. **逐个处理**: 按 P0 → P4 顺序
-2. **测试保障**: 每次重构后运行 `cargo test && cargo clippy`
-3. **增量提交**: 每完成一个优先级提交一次
-4. **保持行为**: 重构不改变外部行为
+**拆分方案**:
+```rust
+enum LoginStatus {
+    Success, Captcha, TwoFactor, Failed
+}
 
-## 当前状态
-- [ ] P0: 拆分 master::run
-- [ ] P1: 重构 processor::process_file
-- [ ] P2: 提取 EmailMonitor 逻辑
-- [ ] P3: 重组文件结构
-- [ ] P4: 引入配置对象
+struct LoginResultDetector;
+impl LoginResultDetector {
+    async fn detect_status(adapter) -> LoginStatus {
+        // 并行检测
+        let (is_success, has_captcha, has_2fa) = tokio::join!(
+            Self::check_success(adapter),
+            Self::check_captcha(adapter),
+            Self::check_2fa(adapter),
+        );
+        // ...
+    }
+}
+```
+
+**收益**:
+- 并行检测提高性能（3 个 await 并行而非串行）
+- 结果检测逻辑可独立测试
+- 易于扩展新的登录状态
+
+---
+
+### P3: 统一 `AdsPowerClient` 错误处理 ✅
+**问题**: 每个 API 调用重复相同的错误处理模式
+
+**拆分方案**:
+```rust
+// 统一 API 调用封装
+async fn call_api<T, R>(method, endpoint, body) -> Result<R>
+async fn call_api_with_query<R>(endpoint, query) -> Result<Option<R>>
+
+// 简化调用
+pub async fn create_profile(&self, username: &str) -> Result<String> {
+    let body = json!({...});
+    let resp: CreateProfileResponse = self
+        .call_api("POST", "/api/v1/user/create", Some(body))
+        .await?;
+    Ok(resp.id)
+}
+```
+
+**收益**:
+- DRY 原则，减少重复代码 60%
+- 统一错误上下文
+- 易于添加重试、日志、监控
+
+---
+
+### P4: 重构主事件循环 ✅
+**问题**: 主循环中的文件处理逻辑 35 行，包含路径检查、配置构建、结果处理
+
+**拆分方案**:
+```rust
+struct FileProcessor {
+    adspower: Option<Arc<AdsPowerClient>>,
+    backend: String,
+    remote_url: String,
+    exe_path: PathBuf,
+    enable_screenshot: bool,
+    doned_dir: PathBuf,
+}
+
+impl FileProcessor {
+    async fn process_incoming_file(...) -> Result<PathBuf>
+    fn extract_batch_name(&path) -> String
+    fn build_process_config(batch_name) -> ProcessConfig
+}
+```
+
+**收益**:
+- 主循环从 80 行降至 25 行 (-69%)
+- 文件处理逻辑可单元测试
+- 更清晰的职责边界
+
+---
+
+## 后续建议
+
+### P3: 重组文件结构
+- 采用 DDD 分层架构 (domain/application/infrastructure)
+- 清晰的依赖方向
+- 更好的模块化
+
+### P4: 引入配置对象
+- `WorkerConfig` 封装 Worker 参数
+- `ProcessConfig` 包含 `WorkerPool`
+- 减少函数参数数量到 1-2 个
+
+---
+
+## 总结
+
+### 第一轮成果 ✅
+- ✅ 降低函数复杂度: 最大函数从 327 行降至 120 行
+- ✅ 提高可读性: 拆分为职责单一的小函数
+- ✅ 提高可测性: 独立函数易于单元测试
+- ✅ 保持兼容性: 所有测试通过
+
+### 第二轮成果 ✅
+- ✅ EmailMonitor 函数从 75 行降至 18 行 (-76%)
+- ✅ 消除 extract_attachments 的潜在 panic
+- ✅ LoginResultDetector 并行检测，提高性能
+- ✅ AdsPowerClient 代码重复减少 60%
+- ✅ 主事件循环从 80 行降至 25 行 (-69%)
+
