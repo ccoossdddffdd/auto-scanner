@@ -9,6 +9,19 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 const PID_FILE: &str = "auto-scanner-master.pid";
 
+struct PidTime;
+
+impl tracing_subscriber::fmt::time::FormatTime for PidTime {
+    fn format_time(&self, w: &mut tracing_subscriber::fmt::format::Writer<'_>) -> std::fmt::Result {
+        write!(
+            w,
+            "{} [{}]",
+            chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.6fZ"),
+            std::process::id()
+        )
+    }
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
@@ -58,11 +71,12 @@ fn main() -> Result<()> {
                     tracing_subscriber::EnvFilter::try_from_default_env()
                         .unwrap_or_else(|_| "info".into()),
                 )
-                .with(tracing_subscriber::fmt::layer().with_writer(std::io::stdout))
+                .with(tracing_subscriber::fmt::layer().with_writer(std::io::stdout).with_timer(PidTime))
                 .with(
                     tracing_subscriber::fmt::layer()
                         .with_writer(non_blocking)
-                        .with_ansi(false),
+                        .with_ansi(false)
+                        .with_timer(PidTime),
                 )
                 .init();
 
