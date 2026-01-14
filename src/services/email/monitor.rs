@@ -141,12 +141,9 @@ impl EmailMonitor {
     async fn fetch_and_process_email(&self, uid: u32, session: &mut ImapSession) -> Result<()> {
         let email_data = self.fetch_email_data(uid, session).await?;
 
-        if email_data.is_none() {
-            warn!("No data returned for email UID {}", uid);
-            return Ok(());
-        }
+        let msg =
+            email_data.ok_or_else(|| anyhow::anyhow!("No data returned for email UID {}", uid))?;
 
-        let msg = email_data.unwrap();
         if let Some(raw) = msg.body() {
             let parsed = MessageParser::default()
                 .parse(raw)
@@ -285,12 +282,22 @@ impl EmailMonitor {
             original_filename: attachment.filename.clone(),
         };
 
-        self.file_tracker.register_email(&uid.to_string())?;
-        self.file_tracker
-            .store_email_metadata(&uid.to_string(), metadata);
+        if let Err(e) = self.file_tracker.register_email(&uid.to_string()) {
+            warn!("Failed to register email: {}", e);
+        }
+        if let Err(e) = self
+            .file_tracker
+            .store_email_metadata(&uid.to_string(), metadata)
+        {
+            warn!("Failed to store email metadata: {}", e);
+        }
 
-        self.file_tracker
-            .mark_downloaded(&uid.to_string(), file_path.clone())?;
+        if let Err(e) = self
+            .file_tracker
+            .mark_downloaded(&uid.to_string(), file_path.clone())
+        {
+            warn!("Failed to mark email as downloaded: {}", e);
+        }
 
         Ok(file_path)
     }
@@ -300,10 +307,9 @@ impl EmailMonitor {
         info!("Marking email {} as read and moving to processed", uid);
 
         // 标记已读
-        session
-            .store(format!("{}", uid), "+FLAGS (\\Seen)")
-            .await
-            .context("Failed to mark email as read")?;
+        if let Err(e) = session.store(format!("{}", uid), "+FLAGS (\\Seen)").await {
+            warn!("Failed to mark email as read: {}", e);
+        }
 
         // 移动到已处理文件夹
         let dest_folder = &self.config.processed_folder;

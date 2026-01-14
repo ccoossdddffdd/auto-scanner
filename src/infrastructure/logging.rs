@@ -1,3 +1,4 @@
+use crate::config::LogConfig;
 use anyhow::Result;
 use chrono::Local;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -16,6 +17,8 @@ impl tracing_subscriber::fmt::time::FormatTime for PidTime {
 }
 
 pub fn init_logging(service_name: &str, is_daemon: bool) -> Result<()> {
+    let config = LogConfig::from_env();
+
     let file_name = format!("{}.log", service_name);
     let file_appender = tracing_appender::rolling::daily("logs", file_name);
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
@@ -24,9 +27,10 @@ pub fn init_logging(service_name: &str, is_daemon: bool) -> Result<()> {
     // This is necessary because we're initializing the global subscriber
     std::mem::forget(_guard);
 
-    let registry = tracing_subscriber::registry().with(
-        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
-    );
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(config.level.as_str()));
+
+    let registry = tracing_subscriber::registry().with(env_filter);
 
     if is_daemon {
         registry

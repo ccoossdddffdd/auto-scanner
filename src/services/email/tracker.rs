@@ -70,9 +70,16 @@ impl FileTracker {
         }
     }
 
+    /// 获取锁定的状态 - 提供更好的错误处理
+    fn lock_state(&self) -> Result<std::sync::MutexGuard<'_, TrackerState>> {
+        self.state
+            .lock()
+            .map_err(|e| anyhow::anyhow!("FileTracker lock poisoned: {}", e))
+    }
+
     /// 注册新邮件
     pub fn register_email(&self, email_id: &str) -> Result<()> {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.lock_state()?;
         state.email_status.insert(
             email_id.to_string(),
             ProcessingStatus::Received {
@@ -84,14 +91,14 @@ impl FileTracker {
 
     /// 存储邮件元数据
     pub fn store_email_metadata(&self, email_id: &str, metadata: EmailMetadata) -> Result<()> {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.lock_state()?;
         state.email_metadata.insert(email_id.to_string(), metadata);
         Ok(())
     }
 
     /// 原子性操作：注册邮件并存储元数据
     pub fn register_with_metadata(&self, email_id: &str, metadata: EmailMetadata) -> Result<()> {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.lock_state()?;
         state.email_status.insert(
             email_id.to_string(),
             ProcessingStatus::Received {
@@ -104,7 +111,7 @@ impl FileTracker {
 
     /// 更新为已下载状态
     pub fn mark_downloaded(&self, email_id: &str, file_path: PathBuf) -> Result<()> {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.lock_state()?;
 
         let filename = file_path
             .file_name()
@@ -126,7 +133,7 @@ impl FileTracker {
 
     /// 更新为处理中状态
     pub fn mark_processing(&self, email_id: &str, file_path: PathBuf) -> Result<()> {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.lock_state()?;
         state.email_status.insert(
             email_id.to_string(),
             ProcessingStatus::Processing {
@@ -139,7 +146,7 @@ impl FileTracker {
 
     /// 标记处理成功
     pub fn mark_success(&self, email_id: &str, processed_file: PathBuf) -> Result<()> {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.lock_state()?;
         state.email_status.insert(
             email_id.to_string(),
             ProcessingStatus::Success {
@@ -157,7 +164,7 @@ impl FileTracker {
         error: String,
         processed_file: Option<PathBuf>,
     ) -> Result<()> {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.lock_state()?;
         state.email_status.insert(
             email_id.to_string(),
             ProcessingStatus::Failed {
@@ -171,7 +178,7 @@ impl FileTracker {
 
     /// 更新文件路径映射（用于文件转换，如 txt -> csv）
     pub fn update_file_path(&self, old_path: &Path, new_path: &Path) -> Result<()> {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.lock_state()?;
 
         let old_filename = old_path
             .file_name()
@@ -194,26 +201,26 @@ impl FileTracker {
 
     /// 通过文件名查找邮件ID
     pub fn find_email_by_file(&self, filename: &str) -> Option<String> {
-        let state = self.state.lock().unwrap();
+        let state = self.lock_state().ok()?;
         state.file_to_email.get(filename).cloned()
     }
 
     /// 获取邮件状态
     pub fn get_status(&self, email_id: &str) -> Option<ProcessingStatus> {
-        let state = self.state.lock().unwrap();
+        let state = self.lock_state().ok()?;
         state.email_status.get(email_id).cloned()
     }
 
     /// 获取邮件元数据
     pub fn get_email_metadata(&self, email_id: &str) -> Option<EmailMetadata> {
-        let state = self.state.lock().unwrap();
+        let state = self.lock_state().ok()?;
         state.email_metadata.get(email_id).cloned()
     }
 
     /// 清理旧记录（超过24小时）
     pub fn cleanup_old_records(&self) -> Result<()> {
         let cutoff = Local::now() - chrono::Duration::hours(24);
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.lock_state()?;
 
         state.email_status.retain(|_, value| match value {
             ProcessingStatus::Received { timestamp } => *timestamp > cutoff,
@@ -228,7 +235,10 @@ impl FileTracker {
 
     /// 获取所有邮件ID
     pub fn get_all_email_ids(&self) -> Vec<String> {
-        let state = self.state.lock().unwrap();
+        let state = match self.lock_state() {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
         state.email_status.keys().cloned().collect()
     }
 }
