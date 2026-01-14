@@ -82,7 +82,7 @@ mod tests {
 
     #[test]
     fn test_cli_master_mode() {
-        let cli = Cli::try_parse_from(&["auto-scanner", "master", "-i", "accounts.csv"]);
+        let cli = Cli::try_parse_from(["auto-scanner", "master", "-i", "accounts.csv"]);
         assert!(cli.is_ok());
         if let Commands::Master { input, .. } = cli.unwrap().command {
             assert_eq!(input, Some("accounts.csv".to_string()));
@@ -93,7 +93,7 @@ mod tests {
 
     #[test]
     fn test_cli_worker_mode() {
-        let cli = Cli::try_parse_from(&[
+        let cli = Cli::try_parse_from([
             "auto-scanner",
             "worker",
             "--username",

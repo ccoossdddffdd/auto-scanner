@@ -13,6 +13,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{error, info, warn};
 
+// Re-export for backward compatibility
+pub use crate::services::email::attachment::Attachment;
+pub use crate::services::email::config::EmailConfig;
+
 /// 邮件监控器
 pub struct EmailMonitor {
     config: EmailConfig,
@@ -285,9 +289,11 @@ impl EmailMonitor {
             original_filename: attachment.filename.clone(),
         };
 
-        self.file_tracker.register_email(&uid.to_string())?;
-        self.file_tracker
-            .store_email_metadata(&uid.to_string(), metadata);
+        self.file_tracker.register_with_metadata(
+            safe_filename.clone(),
+            uid.to_string(),
+            metadata,
+        );
 
         self.file_tracker
             .mark_downloaded(&uid.to_string(), file_path.clone())?;

@@ -1,8 +1,8 @@
 use crate::infrastructure::adspower::AdsPowerClient;
 use crate::infrastructure::logging::init_logging;
 use crate::infrastructure::process::PidManager;
-use crate::services::email::monitor::{EmailConfig, EmailMonitor};
 use crate::services::email::tracker::FileTracker;
+use crate::services::email::{EmailConfig, EmailMonitor};
 use crate::services::processor::{
     process_file, BrowserConfig, FileConfig, ProcessConfig, WorkerConfig,
 };

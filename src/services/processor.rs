@@ -1,3 +1,4 @@
+use crate::core::models::{Account, WorkerResult};
 use crate::infrastructure::adspower::AdsPowerClient;
 use crate::services::email::monitor::EmailMonitor;
 use crate::services::file::get_account_source;
@@ -106,70 +107,96 @@ pub async fn process_file(
     permit_tx: async_channel::Sender<usize>,
     email_monitor: Option<Arc<EmailMonitor>>,
 ) -> Result<PathBuf> {
+    let path_to_process = prepare_input_file(path, &email_monitor).await?;
+    let email_id = extract_email_id(&path_to_process, &email_monitor);
+
+    let processing_result =
+        process_accounts(&path_to_process, batch_name, config, permit_rx, permit_tx).await;
+
+    handle_email_notification(&email_monitor, &email_id, &processing_result).await;
+
+    processing_result
+}
+
+/// 提取邮件 ID
+fn extract_email_id(path: &Path, email_monitor: &Option<Arc<EmailMonitor>>) -> Option<String> {
+    email_monitor.as_ref().and_then(|monitor| {
+        let filename = path.file_name()?.to_str().unwrap_or("unknown");
+        monitor.get_file_tracker().find_email_by_file(filename)
+    })
+}
+
+/// 处理账号列表
+async fn process_accounts(
+    path: &Path,
+    batch_name: &str,
+    config: ProcessConfig,
+    permit_rx: async_channel::Receiver<usize>,
+    permit_tx: async_channel::Sender<usize>,
+) -> Result<PathBuf> {
     let extension = path
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("")
         .to_lowercase();
 
-    let path_to_process = prepare_input_file(path, &email_monitor).await?;
+    let source = get_account_source(path);
+    let (accounts, records, headers) = source.read(path).await?;
 
-    let email_id = if let Some(monitor) = &email_monitor {
-        let filename = path_to_process
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("unknown");
-        monitor.get_file_tracker().find_email_by_file(filename)
-    } else {
-        None
-    };
+    info!("Read {} accounts from {}", accounts.len(), batch_name);
 
-    let processing_result = async {
-        let source = get_account_source(&path_to_process);
-        let (accounts, records, headers) = source.read(&path_to_process).await?;
+    let results = spawn_workers(&accounts, &config, permit_rx, permit_tx).await;
 
-        info!("Read {} accounts from {}", accounts.len(), batch_name);
+    write_results_and_rename(
+        path,
+        &extension,
+        results,
+        records,
+        headers,
+        &config.file.doned_dir,
+    )
+    .await
+}
 
-        let coordinator = WorkerCoordinator {
-            permit_rx,
-            permit_tx,
-            adspower: config.browser.adspower.clone(),
-            exe_path: config.worker.exe_path.clone(),
-            backend: config.browser.backend.clone(),
-            remote_url: config.browser.remote_url.clone(),
-            enable_screenshot: config.worker.enable_screenshot,
-        };
+/// 批量启动 Workers
+async fn spawn_workers(
+    accounts: &[Account],
+    config: &ProcessConfig,
+    permit_rx: async_channel::Receiver<usize>,
+    permit_tx: async_channel::Sender<usize>,
+) -> Vec<(usize, Option<WorkerResult>)> {
+    let coordinator = Arc::new(WorkerCoordinator {
+        permit_rx,
+        permit_tx,
+        adspower: config.browser.adspower.clone(),
+        exe_path: config.worker.exe_path.clone(),
+        backend: config.browser.backend.clone(),
+        remote_url: config.browser.remote_url.clone(),
+        enable_screenshot: config.worker.enable_screenshot,
+    });
 
-        let mut handles = Vec::new();
-        for (index, account) in accounts.iter().enumerate() {
-            let coord = coordinator.clone();
-            let account = account.clone();
-            let handle = tokio::spawn(async move { coord.spawn_worker(index, &account).await });
-            handles.push(handle);
-        }
-
-        let mut results = Vec::new();
-        for handle in handles {
-            if let Ok(res) = handle.await {
-                results.push(res);
-            }
-        }
-
-        results.sort_by_key(|k| k.0);
-
-        write_results_and_rename(
-            &path_to_process,
-            &extension,
-            results,
-            records,
-            headers,
-            &config.file.doned_dir,
-        )
-        .await
+    let mut handles = Vec::new();
+    for (index, account) in accounts.iter().enumerate() {
+        let coord = Arc::clone(&coordinator);
+        let account = account.clone();
+        let handle = tokio::spawn(async move { coord.spawn_worker(index, &account).await });
+        handles.push(handle);
     }
-    .await;
 
-    handle_email_notification(&email_monitor, &email_id, &processing_result).await;
+    collect_results(handles).await
+}
 
-    processing_result
+/// 收集 Worker 结果
+async fn collect_results(
+    handles: Vec<tokio::task::JoinHandle<(usize, Option<WorkerResult>)>>,
+) -> Vec<(usize, Option<WorkerResult>)> {
+    let mut results = Vec::new();
+    for handle in handles {
+        if let Ok(res) = handle.await {
+            results.push(res);
+        }
+    }
+
+    results.sort_by_key(|k| k.0);
+    results
 }
