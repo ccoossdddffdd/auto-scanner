@@ -25,6 +25,14 @@ daemonize = "0.5.0"
 calamine = "0.32.0"
 rust_xlsxwriter = "0.92.3"
 
+# Email monitoring
+imap = { version = "3.0.0-alpha.15", features = ["native-tls"] }
+lettre = { version = "0.11.19", features = ["tokio1", "smtp-transport", "tokio1-native-tls", "builder"] }
+mail-parser = "0.11.1"
+mime = "0.3.17"
+mime_guess = "2.0.5"
+base64 = "0.22.1"
+
 [dev-dependencies]
 tempfile = "3.15"
 
