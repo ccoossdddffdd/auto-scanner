@@ -20,7 +20,7 @@ pub enum Commands {
         #[arg(long, default_value = "playwright")]
         backend: String,
 
-        /// Base remote debugging URL for the browser
+        /// Base remote debugging URL for browser
         #[arg(long, default_value = "http://localhost:9222")]
         remote_url: String,
 
@@ -43,6 +43,14 @@ pub enum Commands {
         /// Check if the master process is running
         #[arg(long, default_value = "false")]
         status: bool,
+
+        /// Enable email monitoring
+        #[arg(long, default_value = "false")]
+        enable_email_monitor: bool,
+
+        /// Email polling interval in seconds
+        #[arg(long, default_value = "60")]
+        email_poll_interval: u64,
     },
     /// Run in worker mode to perform a single login (usually called by master)
     Worker {

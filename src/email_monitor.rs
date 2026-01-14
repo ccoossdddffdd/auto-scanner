@@ -65,7 +65,7 @@ pub struct EmailMonitor {
 
 impl EmailMonitor {
     /// 创建新的邮件监控器
-    pub fn new(config: EmailConfig, file_tracker: Arc<FileTracker>) -> Result<Self> {
+    pub fn new(config: EmailConfig, file_tracker: Arc<FileTracker>) -> Result<EmailMonitor> {
         let email_sender = EmailSender::new(
             config.smtp_server.clone(),
             config.smtp_port,

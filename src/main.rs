@@ -35,6 +35,8 @@ fn main() -> Result<()> {
             stop,
             daemon,
             status,
+            enable_email_monitor,
+            email_poll_interval,
         } => {
             if daemon && !stop && !status {
                 let stdout = File::create("logs/auto-scanner.out")
@@ -69,6 +71,8 @@ fn main() -> Result<()> {
                 stop,
                 daemon,
                 status,
+                enable_email_monitor,
+                email_poll_interval,
             };
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(async { master::run(input, config).await })?;

@@ -1,6 +1,8 @@
 use crate::adspower::AdsPowerClient;
 use crate::csv_reader::read_accounts_from_csv;
+use crate::email_monitor::EmailMonitor;
 use crate::excel_handler::{read_accounts_from_excel, write_results_to_excel};
+use crate::file_tracker::FileTracker;
 use crate::models::WorkerResult;
 use anyhow::{Context, Result};
 use async_channel;
@@ -8,6 +10,7 @@ use chrono::Local;
 use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use crate::email_monitor::EmailConfig;
 use std::collections::HashSet;
 use std::env;
 use std::fs;
@@ -26,6 +29,8 @@ pub struct MasterConfig {
     pub stop: bool,
     pub daemon: bool,
     pub status: bool,
+    pub enable_email_monitor: bool,
+    pub email_poll_interval: u64,
 }
 
 #[derive(Clone)]
@@ -142,6 +147,47 @@ pub async fn run(input_dir: Option<String>, config: MasterConfig) -> Result<()> 
     )?;
 
     watcher.watch(&input_path, RecursiveMode::NonRecursive)?;
+
+    // 启动邮件监控（如果启用）
+    if config.enable_email_monitor {
+        info!("Email monitoring enabled");
+
+        let file_tracker = Arc::new(FileTracker::new());
+        let email_config = match EmailConfig::from_env() {
+            Ok(config) => config,
+            Err(e) => {
+                warn!(
+                    "Failed to create email config: {}, disabling email monitoring",
+                    e
+                );
+                return Ok(());
+            }
+        };
+
+        let email_monitor = match EmailMonitor::new(email_config, file_tracker.clone()) {
+            Ok(monitor) => monitor,
+            Err(e) => {
+                warn!(
+                    "Failed to create email monitor: {}, disabling email monitoring",
+                    e
+                );
+                return Ok(());
+            }
+        };
+
+        // 启动邮件监控任务
+        let monitor_handle = tokio::spawn(async move {
+            info!("Email monitor task started");
+            if let Err(e) = email_monitor.start_monitoring().await {
+                error!("Email monitor failed: {}", e);
+            }
+        });
+
+        info!(
+            "Email monitor task spawned (handle: {:?})",
+            monitor_handle.id()
+        );
+    }
 
     let (permit_tx, permit_rx) = async_channel::bounded(config.thread_count);
     for i in 0..config.thread_count {
