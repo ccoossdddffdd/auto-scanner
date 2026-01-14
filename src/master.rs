@@ -399,11 +399,8 @@ async fn process_file(
     // Sort by index to maintain original order
     results.sort_by_key(|k| k.0);
 
-    // Create result CSV
-    let result_filename = format!("{}.result.csv", path.file_stem().unwrap().to_str().unwrap());
-    let result_path = path.parent().unwrap().join(result_filename);
-
-    let mut wtr = csv::Writer::from_path(&result_path)?;
+    // Overwrite the original file
+    let mut wtr = csv::Writer::from_path(path)?;
 
     // Write Headers
     let mut new_headers = headers.clone();
@@ -434,7 +431,7 @@ async fn process_file(
     }
 
     wtr.flush()?;
-    info!("Results written to {:?}", result_path);
+    info!("Results written back to {:?}", path);
 
     Ok(())
 }
