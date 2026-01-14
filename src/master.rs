@@ -3,6 +3,7 @@ use crate::csv_reader::read_accounts_from_csv;
 use crate::database::Database;
 use anyhow::{Context, Result};
 use chrono::Local;
+use daemonize::Daemonize;
 use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
@@ -15,6 +16,7 @@ use std::sync::{Arc, Mutex};
 use tokio::process::Command;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 const PID_FILE: &str = "auto-scanner-master.pid";
 
@@ -25,34 +27,79 @@ pub async fn run(
     thread_count: usize,
     enable_screenshot: bool,
     stop: bool,
+    daemon: bool,
 ) -> Result<()> {
     if stop {
         return stop_master();
     }
 
-    let input_dir = input_dir.expect("Input directory is required unless --stop is specified");
+    if daemon {
+        let stdout = File::create("logs/auto-scanner.out").context("Failed to create stdout file")?;
+        let stderr = File::create("logs/auto-scanner.err").context("Failed to create stderr file")?;
 
-    info!(
-        "Master started. Monitoring directory: {}, Threads: {}, Screenshots: {}, Backend: {}",
-        input_dir, thread_count, enable_screenshot, backend
-    );
+        let daemonize = Daemonize::new()
+            .pid_file(PID_FILE) // Use daemonize to handle PID file creation
+            .chown_pid_file(true)
+            .working_directory(".")
+            .stdout(stdout)
+            .stderr(stderr);
 
-    // Write PID file
-    let pid = std::process::id();
-    if Path::new(PID_FILE).exists() {
-        // Check if process is actually running
-        if let Ok(content) = fs::read_to_string(PID_FILE) {
-            if let Ok(old_pid) = content.trim().parse::<i32>() {
-                if check_process_running(old_pid) {
-                    anyhow::bail!("Master process is already running (PID: {})", old_pid);
-                }
+        match daemonize.start() {
+            Ok(_) => {
+                // We are now in the daemon process
+            }
+            Err(e) => {
+                eprintln!("Error, {}", e);
+                anyhow::bail!("Failed to daemonize: {}", e);
             }
         }
     }
 
-    let mut pid_file = File::create(PID_FILE).context("Failed to create PID file")?;
-    write!(pid_file, "{}", pid)?;
-    info!("Written PID {} to {}", pid, PID_FILE);
+    // Initialize logging AFTER daemonization
+    // If not daemon, we still want stdout logging. If daemon, stdout is redirected to file.
+    let file_appender = tracing_appender::rolling::daily("logs", "auto-scanner.log");
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "info".into()),
+        )
+        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stdout))
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(non_blocking)
+                .with_ansi(false),
+        )
+        .init();
+
+    let input_dir = input_dir.expect("Input directory is required unless --stop is specified");
+    
+    info!(
+        "Master started. Monitoring directory: {}, Threads: {}, Screenshots: {}, Backend: {}, Daemon: {}",
+        input_dir, thread_count, enable_screenshot, backend, daemon
+    );
+
+    // If NOT in daemon mode, we handle PID file manually. 
+    // Daemonize crate handles it automatically if configured.
+    if !daemon {
+        // Write PID file
+        let pid = std::process::id();
+        if Path::new(PID_FILE).exists() {
+            // Check if process is actually running
+            if let Ok(content) = fs::read_to_string(PID_FILE) {
+                 if let Ok(old_pid) = content.trim().parse::<i32>() {
+                     if check_process_running(old_pid) {
+                         anyhow::bail!("Master process is already running (PID: {})", old_pid);
+                     }
+                 }
+            }
+        }
+        
+        let mut pid_file = File::create(PID_FILE).context("Failed to create PID file")?;
+        write!(pid_file, "{}", pid)?;
+        info!("Written PID {} to {}", pid, PID_FILE);
+    }
 
     let db = Arc::new(Database::new("auto-scanner.db").await?);
     let adspower = if backend == "adspower" {

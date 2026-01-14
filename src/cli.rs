@@ -35,6 +35,10 @@ pub enum Commands {
         /// Stop the running master process
         #[arg(long, default_value = "false")]
         stop: bool,
+
+        /// Run as a background daemon
+        #[arg(long, default_value = "false")]
+        daemon: bool,
     },
     /// Run in worker mode to perform a single login (usually called by master)
     Worker {
