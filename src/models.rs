@@ -38,7 +38,7 @@ mod tests {
     #[test]
     fn test_account_creation() {
         let account = Account::new("test@example.com".to_string(), "password123".to_string());
-        
+
         assert_eq!(account.username, "test@example.com");
         assert_eq!(account.password, "password123");
     }
@@ -46,10 +46,10 @@ mod tests {
     #[test]
     fn test_account_serialization() {
         let account = Account::new("user@test.com".to_string(), "secret".to_string());
-        
+
         let serialized = serde_json::to_string(&account).unwrap();
         let deserialized: Account = serde_json::from_str(&serialized).unwrap();
-        
+
         assert_eq!(account, deserialized);
     }
 }

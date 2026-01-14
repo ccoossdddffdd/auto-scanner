@@ -26,18 +26,29 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Master { input, backend, remote_url, thread_count, enable_screenshot, stop, daemon, status } => {
+        Commands::Master {
+            input,
+            backend,
+            remote_url,
+            thread_count,
+            enable_screenshot,
+            stop,
+            daemon,
+            status,
+        } => {
             if daemon && !stop && !status {
-                let stdout = File::create("logs/auto-scanner.out").context("Failed to create stdout file")?;
-                let stderr = File::create("logs/auto-scanner.err").context("Failed to create stderr file")?;
-        
+                let stdout = File::create("logs/auto-scanner.out")
+                    .context("Failed to create stdout file")?;
+                let stderr = File::create("logs/auto-scanner.err")
+                    .context("Failed to create stderr file")?;
+
                 let daemonize = Daemonize::new()
                     .pid_file(PID_FILE) // Use daemonize to handle PID file creation
                     .chown_pid_file(true)
                     .working_directory(".")
                     .stdout(stdout)
                     .stderr(stderr);
-        
+
                 match daemonize.start() {
                     Ok(_) => {
                         // We are now in the daemon process
@@ -50,10 +61,17 @@ fn main() -> Result<()> {
             }
 
             // Create runtime and run master
+            let config = master::MasterConfig {
+                backend,
+                remote_url,
+                thread_count,
+                enable_screenshot,
+                stop,
+                daemon,
+                status,
+            };
             let rt = tokio::runtime::Runtime::new()?;
-            rt.block_on(async {
-                 master::run(input, backend, remote_url, thread_count, enable_screenshot, stop, daemon, status).await
-            })?;
+            rt.block_on(async { master::run(input, config).await })?;
         }
         Commands::Worker {
             username,
@@ -71,7 +89,11 @@ fn main() -> Result<()> {
                     tracing_subscriber::EnvFilter::try_from_default_env()
                         .unwrap_or_else(|_| "info".into()),
                 )
-                .with(tracing_subscriber::fmt::layer().with_writer(std::io::stdout).with_timer(PidTime))
+                .with(
+                    tracing_subscriber::fmt::layer()
+                        .with_writer(std::io::stdout)
+                        .with_timer(PidTime),
+                )
                 .with(
                     tracing_subscriber::fmt::layer()
                         .with_writer(non_blocking)

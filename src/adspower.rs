@@ -44,6 +44,12 @@ pub struct AdsPowerClient {
     client: Client,
 }
 
+impl Default for AdsPowerClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AdsPowerClient {
     pub fn new() -> Self {
         Self {

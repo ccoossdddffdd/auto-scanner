@@ -144,7 +144,7 @@ async fn perform_login(
         }
 
         let timestamp = Local::now().format("%Y%m%d-%H%M%S");
-        let safe_username = account.username.replace('@', "_").replace('.', "_");
+        let safe_username = account.username.replace(['@', '.'], "_");
         let filename = format!("screenshot/login_{}_{}.png", safe_username, timestamp);
 
         adapter.take_screenshot(&filename).await?;

@@ -3,38 +3,50 @@ use crate::csv_reader::read_accounts_from_csv;
 use crate::excel_handler::{read_accounts_from_excel, write_results_to_excel};
 use crate::models::WorkerResult;
 use anyhow::{Context, Result};
+use async_channel;
 use chrono::Local;
 use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashSet;
 use std::env;
-use std::fs::{self, File};
-use std::io::Write;
+use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
-use tokio::process::Command;
+use std::process::Command;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
+
+#[derive(Clone)]
+pub struct MasterConfig {
+    pub backend: String,
+    pub remote_url: String,
+    pub thread_count: usize,
+    pub enable_screenshot: bool,
+    pub stop: bool,
+    pub daemon: bool,
+    pub status: bool,
+}
+
+#[derive(Clone)]
+pub struct ProcessConfig {
+    pub batch_name: String,
+    pub adspower: Option<Arc<AdsPowerClient>>,
+    pub backend: String,
+    pub remote_url: String,
+    pub exe_path: PathBuf,
+    pub enable_screenshot: bool,
+}
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 const PID_FILE: &str = "auto-scanner-master.pid";
 
-pub async fn run(
-    input_dir: Option<String>,
-    backend: String,
-    remote_url: String,
-    thread_count: usize,
-    enable_screenshot: bool,
-    stop: bool,
-    daemon: bool,
-    status: bool,
-) -> Result<()> {
-    if status {
+pub async fn run(input_dir: Option<String>, config: MasterConfig) -> Result<()> {
+    if config.status {
         return check_status();
     }
 
-    if stop {
+    if config.stop {
         return stop_master();
     }
 
@@ -58,10 +70,10 @@ pub async fn run(
 
     info!(
         "Master started. Monitoring directory: {}, Threads: {}, Screenshots: {}, Backend: {}, Daemon: {}",
-        input_dir, thread_count, enable_screenshot, backend, daemon
+        input_dir, config.thread_count, config.enable_screenshot, config.backend, config.daemon
     );
 
-    if !daemon {
+    if !config.daemon {
         let pid = std::process::id();
         if Path::new(PID_FILE).exists() {
             if let Ok(content) = fs::read_to_string(PID_FILE) {
@@ -72,13 +84,11 @@ pub async fn run(
                 }
             }
         }
-
-        let mut pid_file = File::create(PID_FILE).context("Failed to create PID file")?;
-        write!(pid_file, "{}", pid)?;
+        fs::write(PID_FILE, pid.to_string()).context("Failed to write PID file")?;
         info!("Written PID {} to {}", pid, PID_FILE);
     }
 
-    let adspower = if backend == "adspower" {
+    let adspower = if config.backend == "adspower" {
         Some(Arc::new(AdsPowerClient::new()))
     } else {
         None
@@ -90,16 +100,19 @@ pub async fn run(
         fs::create_dir_all(&input_path).context("Failed to create monitoring directory")?;
     }
 
-    let (tx, mut rx) = mpsc::channel(100);
-    let processing_files = Arc::new(Mutex::new(HashSet::new()));
+    let (tx, mut rx) = mpsc::channel::<PathBuf>(100);
+    let processing_files = Arc::new(std::sync::Mutex::new(HashSet::new()));
 
     let entries = fs::read_dir(&input_path)?;
     for entry in entries {
         let entry = entry?;
         let path = entry.path();
         if is_supported_file(&path) {
-            let mut processing = processing_files.lock().unwrap();
-            if processing.insert(path.clone()) {
+            let should_process = {
+                let mut processing = processing_files.lock().unwrap();
+                processing.insert(path.clone())
+            };
+            if should_process {
                 tx.send(path).await?;
             }
         }
@@ -109,8 +122,8 @@ pub async fn run(
     let processing_files_clone = processing_files.clone();
     let mut watcher = RecommendedWatcher::new(
         move |res: notify::Result<notify::Event>| match res {
-            Ok(event) => match event.kind {
-                EventKind::Create(_) => {
+            Ok(event) => {
+                if let EventKind::Create(_) = event.kind {
                     info!("Received file event: {:?}", event.kind);
                     for path in event.paths {
                         if is_supported_file(&path) {
@@ -122,8 +135,7 @@ pub async fn run(
                         }
                     }
                 }
-                _ => {}
-            },
+            }
             Err(e) => error!("Watch error: {:?}", e),
         },
         Config::default(),
@@ -131,8 +143,8 @@ pub async fn run(
 
     watcher.watch(&input_path, RecursiveMode::NonRecursive)?;
 
-    let (permit_tx, permit_rx) = async_channel::bounded(thread_count);
-    for i in 0..thread_count {
+    let (permit_tx, permit_rx) = async_channel::bounded(config.thread_count);
+    for i in 0..config.thread_count {
         permit_tx
             .send(i)
             .await
@@ -170,16 +182,21 @@ pub async fn run(
                     .unwrap_or("unknown")
                     .to_string();
 
+                let process_config = ProcessConfig {
+                    batch_name: batch_name.clone(),
+                    adspower: adspower.clone(),
+                    backend: config.backend.clone(),
+                    remote_url: config.remote_url.clone(),
+                    exe_path: exe_path.clone(),
+                    enable_screenshot: config.enable_screenshot,
+                };
+
                 let result = process_file(
                     &csv_path,
                     &batch_name,
-                    adspower.clone(),
-                    &exe_path,
-                    &backend,
-                    &remote_url,
+                    process_config,
                     permit_rx.clone(),
                     permit_tx.clone(),
-                    enable_screenshot,
                 )
                 .await;
 
@@ -276,7 +293,7 @@ fn is_supported_file(path: &Path) -> bool {
     }
 
     // Check extension
-    path.extension().map_or(false, |ext| {
+    path.extension().is_some_and(|ext| {
         let ext = ext.to_string_lossy().to_lowercase();
         ext == "csv" || ext == "xls" || ext == "xlsx" || ext == "txt"
     })
@@ -285,13 +302,9 @@ fn is_supported_file(path: &Path) -> bool {
 async fn process_file(
     path: &Path,
     batch_name: &str,
-    adspower: Option<Arc<AdsPowerClient>>,
-    exe_path: &PathBuf,
-    backend: &str,
-    remote_url: &str,
+    config: ProcessConfig,
     permit_rx: async_channel::Receiver<usize>,
     permit_tx: async_channel::Sender<usize>,
-    enable_screenshot: bool,
 ) -> Result<()> {
     let extension = path
         .extension()
@@ -326,13 +339,13 @@ async fn process_file(
     for (index, account) in accounts.iter().enumerate() {
         let thread_index = permit_rx.recv().await.unwrap();
 
-        let exe_path = exe_path.clone();
+        let exe_path = config.exe_path.clone();
         let username = account.username.clone();
         let password = account.password.clone();
-        let backend_str = backend.to_string();
-        let remote_url_str = remote_url.to_string();
+        let backend_str = config.backend.clone();
+        let remote_url_str = config.remote_url.clone();
 
-        let adspower = adspower.clone();
+        let adspower = config.adspower.clone();
         let permit_tx = permit_tx.clone();
 
         let handle = tokio::spawn(async move {
@@ -387,12 +400,12 @@ async fn process_file(
                 .arg("--backend")
                 .arg(&backend_str);
 
-            if enable_screenshot {
+            if config.enable_screenshot {
                 cmd.arg("--enable-screenshot");
             }
 
             // Capture output
-            let output = cmd.output().await;
+            let output = cmd.output();
 
             if let Some(client) = &adspower {
                 if let Some(id) = adspower_id {

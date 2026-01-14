@@ -4,6 +4,7 @@
 /logs
 /.trae
 /.cloudbase
+/.opencode
 
 auto-scanner.db
 auto-scanner.db*
