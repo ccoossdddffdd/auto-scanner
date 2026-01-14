@@ -404,10 +404,10 @@ async fn process_file(
 
     // Write Headers
     let mut new_headers = headers.clone();
-    new_headers.push_field("Status");
-    new_headers.push_field("Captcha");
+    new_headers.push_field("状态");
+    new_headers.push_field("验证码");
     new_headers.push_field("2FA");
-    new_headers.push_field("Message");
+    new_headers.push_field("信息");
     wtr.write_record(&new_headers)?;
 
     for (idx, worker_res_opt) in results {
@@ -421,10 +421,10 @@ async fn process_file(
                 new_record.push_field(&res.message);
             } else {
                 // Default failure if no result returned
-                new_record.push_field("System Error");
-                new_record.push_field("Unknown");
-                new_record.push_field("Unknown");
-                new_record.push_field("Worker execution failed");
+                new_record.push_field("系统错误");
+                new_record.push_field("未知");
+                new_record.push_field("未知");
+                new_record.push_field("Worker 执行失败");
             }
             wtr.write_record(&new_record)?;
         }

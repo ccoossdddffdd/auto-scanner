@@ -22,13 +22,17 @@ pub async fn run(
     let account = Account::new(username.clone(), password);
 
     let adapter_result: Result<Box<dyn BrowserAdapter>> = match backend.as_str() {
-        "playwright" | "cdp" | "adspower" => {
-            match PlaywrightAdapter::new(&remote_url).await {
-                Ok(adapter) => Ok(Box::new(adapter)),
-                Err(e) => Err(anyhow::anyhow!("Failed to initialize Playwright adapter: {}", e)),
-            }
+        "playwright" | "cdp" | "adspower" => match PlaywrightAdapter::new(&remote_url).await {
+            Ok(adapter) => Ok(Box::new(adapter)),
+            Err(e) => Err(anyhow::anyhow!(
+                "Failed to initialize Playwright adapter: {}",
+                e
+            )),
         },
-        _ => Err(anyhow::anyhow!("Unsupported backend in worker: {}", backend)),
+        _ => Err(anyhow::anyhow!(
+            "Unsupported backend in worker: {}",
+            backend
+        )),
     };
 
     let adapter = match adapter_result {
@@ -36,10 +40,10 @@ pub async fn run(
         Err(e) => {
             error!("Browser initialization failed for {}: {}", username, e);
             let result = WorkerResult {
-                status: "Login Failed".to_string(),
-                captcha: "Unknown".to_string(),
-                two_fa: "Unknown".to_string(),
-                message: format!("Browser init failed: {}", e),
+                status: "登录失败".to_string(),
+                captcha: "未知".to_string(),
+                two_fa: "未知".to_string(),
+                message: format!("浏览器初始化失败: {}", e),
             };
             println!("RESULT_JSON:{}", serde_json::to_string(&result)?);
             return Err(e);
@@ -57,10 +61,10 @@ pub async fn run(
         Err(e) => {
             error!("Login failed for {}: {}", username, e);
             WorkerResult {
-                status: "Login Failed".to_string(),
-                captcha: "Unknown".to_string(),
-                two_fa: "Unknown".to_string(),
-                message: format!("Login error: {}", e),
+                status: "登录失败".to_string(),
+                captcha: "未知".to_string(),
+                two_fa: "未知".to_string(),
+                message: format!("登录错误: {}", e),
             }
         }
     };
@@ -96,10 +100,10 @@ async fn perform_login(
     tokio::time::sleep(std::time::Duration::from_secs(8)).await;
 
     let mut result = WorkerResult {
-        status: "Login Failed".to_string(),
-        captcha: "Not Needed".to_string(),
-        two_fa: "Not Needed".to_string(),
-        message: "Unknown failure".to_string(),
+        status: "登录失败".to_string(),
+        captcha: "不需要".to_string(),
+        two_fa: "不需要".to_string(),
+        message: "未知失败".to_string(),
     };
 
     if adapter
@@ -112,24 +116,24 @@ async fn perform_login(
             .unwrap_or(false)
     {
         info!("Login detected as successful");
-        result.status = "Login Success".to_string();
-        result.message = "Success".to_string();
+        result.status = "登录成功".to_string();
+        result.message = "成功".to_string();
     } else if adapter
         .is_visible("input[name='captcha_response']")
         .await
         .unwrap_or(false)
     {
         info!("Captcha detected");
-        result.captcha = "Needed".to_string();
-        result.message = "Captcha detected".to_string();
+        result.captcha = "需要".to_string();
+        result.message = "检测到验证码".to_string();
     } else if adapter
         .is_visible("input[name='approvals_code']")
         .await
         .unwrap_or(false)
     {
         info!("2FA detected");
-        result.two_fa = "Needed".to_string();
-        result.message = "2FA detected".to_string();
+        result.two_fa = "需要".to_string();
+        result.message = "检测到 2FA".to_string();
     }
 
     if enable_screenshot {
