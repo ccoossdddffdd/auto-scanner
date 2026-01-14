@@ -278,7 +278,7 @@ fn is_supported_file(path: &Path) -> bool {
     // Check extension
     path.extension().map_or(false, |ext| {
         let ext = ext.to_string_lossy().to_lowercase();
-        ext == "csv" || ext == "xls" || ext == "xlsx"
+        ext == "csv" || ext == "xls" || ext == "xlsx" || ext == "txt"
     })
 }
 
@@ -299,12 +299,24 @@ async fn process_file(
         .unwrap_or("")
         .to_lowercase();
     let is_excel = extension == "xls" || extension == "xlsx";
+    let is_txt = extension == "txt";
+
+    // Handle TXT to CSV conversion
+    let path_to_process = if is_txt {
+        let new_path = convert_txt_to_csv(path).await?;
+        // We delete the original txt file as requested
+        fs::remove_file(path).context("Failed to remove original TXT file")?;
+        info!("Converted {:?} to CSV and removed original", path);
+        new_path
+    } else {
+        path.to_path_buf()
+    };
 
     // Read accounts and original records/headers
     let (accounts, records, headers) = if is_excel {
-        read_accounts_from_excel(path)?
+        read_accounts_from_excel(&path_to_process)?
     } else {
-        read_accounts_from_csv(path.to_str().unwrap()).await?
+        read_accounts_from_csv(path_to_process.to_str().unwrap()).await?
     };
 
     info!("Read {} accounts from {}", accounts.len(), batch_name);
@@ -432,7 +444,7 @@ async fn process_file(
         new_headers.push("验证码".to_string());
         new_headers.push("2FA".to_string());
         new_headers.push("信息".to_string());
-        
+
         let mut new_records = Vec::new();
         for (idx, worker_res_opt) in results {
             if let Some(record) = records.get(idx) {
@@ -454,7 +466,7 @@ async fn process_file(
         write_results_to_excel(path, &new_headers, &new_records)?;
     } else {
         let mut wtr = csv::Writer::from_path(path)?;
-        
+
         // Write Headers
         let mut new_headers = headers.clone();
         new_headers.push("状态".to_string());
@@ -466,7 +478,7 @@ async fn process_file(
         for (idx, worker_res_opt) in results {
             if let Some(record) = records.get(idx) {
                 let mut new_record = record.clone();
-                
+
                 if let Some(res) = worker_res_opt {
                     new_record.push(res.status);
                     new_record.push(res.captcha);
@@ -485,9 +497,50 @@ async fn process_file(
         wtr.flush()?;
     }
 
-    info!("Results written back to {:?}", path);
+    info!("Results written back to {:?}", path_to_process);
+
+    // If it was an xls file, we need to delete it as we saved a new .xlsx file (implied by write_results_to_excel)
+    // Wait, write_results_to_excel overwrites if path is same, OR creates new if we changed extension?
+    // In excel_handler, we used Workbook::save(path). If path was .xls, rust_xlsxwriter might fail or just write zip content to .xls file.
+    // rust_xlsxwriter strictly writes xlsx format.
+    // If input was .xls, and we passed that path to save(), it overwrote .xls with .xlsx content but kept .xls extension?
+    // That's confusing. We should probably rename it to .xlsx if it was .xls.
+
+    if extension == "xls" {
+        // The write_results_to_excel function writes XLSX format.
+        // If we passed a .xls path, the file content is now XLSX but extension is .xls.
+        // We should rename it to .xlsx
+        let new_xlsx_path = path_to_process.with_extension("xlsx");
+        fs::rename(&path_to_process, &new_xlsx_path).context("Failed to rename .xls to .xlsx")?;
+        info!("Renamed processed .xls to .xlsx: {:?}", new_xlsx_path);
+        // Original .xls is effectively "deleted" (replaced/renamed)
+        rename_processed_file(&new_xlsx_path)?;
+    } else {
+        rename_processed_file(&path_to_process)?;
+    }
 
     Ok(())
+}
+
+async fn convert_txt_to_csv(path: &Path) -> Result<PathBuf> {
+    info!("Converting TXT to CSV: {:?}", path);
+    let content = tokio::fs::read_to_string(path).await?;
+    let mut csv_content = String::from("username,password\n");
+
+    for line in content.lines() {
+        if let Some((user, pass)) = line.split_once(':') {
+            let user = user.trim();
+            let pass = pass.trim();
+            if !user.is_empty() && !pass.is_empty() {
+                csv_content.push_str(&format!("{},{}\n", user, pass));
+            }
+        }
+    }
+
+    let csv_path = path.with_extension("csv");
+    tokio::fs::write(&csv_path, csv_content).await?;
+
+    Ok(csv_path)
 }
 
 fn rename_processed_file(path: &Path) -> Result<()> {
