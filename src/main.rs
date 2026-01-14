@@ -13,8 +13,7 @@ async fn main() -> Result<()> {
 
     tracing_subscriber::registry()
         .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .with(tracing_subscriber::fmt::layer().with_writer(std::io::stdout))
         .with(
@@ -27,10 +26,31 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Master { input, backend, remote_url, thread_count, enable_screenshot } => {
-            master::run(input, backend, remote_url, thread_count, enable_screenshot).await?;
+        Commands::Master {
+            input,
+            backend,
+            remote_url,
+            thread_count,
+            enable_screenshot,
+            stop,
+        } => {
+            master::run(
+                input,
+                backend,
+                remote_url,
+                thread_count,
+                enable_screenshot,
+                stop,
+            )
+            .await?;
         }
-        Commands::Worker { username, password, remote_url, backend, enable_screenshot } => {
+        Commands::Worker {
+            username,
+            password,
+            remote_url,
+            backend,
+            enable_screenshot,
+        } => {
             worker::run(username, password, remote_url, backend, enable_screenshot).await?;
         }
     }

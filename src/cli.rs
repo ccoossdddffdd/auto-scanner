@@ -13,8 +13,8 @@ pub enum Commands {
     /// Run in master mode to manage workers and accounts
     Master {
         /// Directory to monitor for CSV files
-        #[arg(short, long, value_name = "DIR")]
-        input: String,
+        #[arg(short, long, value_name = "DIR", required_unless_present = "stop")]
+        input: Option<String>,
 
         /// Browser backend to use
         #[arg(long, default_value = "playwright")]
@@ -31,6 +31,10 @@ pub enum Commands {
         /// Enable screenshots after login
         #[arg(long, default_value = "false")]
         enable_screenshot: bool,
+
+        /// Stop the running master process
+        #[arg(long, default_value = "false")]
+        stop: bool,
     },
     /// Run in worker mode to perform a single login (usually called by master)
     Worker {
@@ -65,7 +69,7 @@ mod tests {
         let cli = Cli::try_parse_from(&["auto-scanner", "master", "-i", "accounts.csv"]);
         assert!(cli.is_ok());
         if let Commands::Master { input, .. } = cli.unwrap().command {
-            assert_eq!(input, "accounts.csv");
+            assert_eq!(input, Some("accounts.csv".to_string()));
         } else {
             panic!("Expected Master command");
         }
@@ -84,7 +88,10 @@ mod tests {
             "http://localhost:9222",
         ]);
         assert!(cli.is_ok());
-        if let Commands::Worker { username, password, .. } = cli.unwrap().command {
+        if let Commands::Worker {
+            username, password, ..
+        } = cli.unwrap().command
+        {
             assert_eq!(username, "user");
             assert_eq!(password, "pass");
         } else {
