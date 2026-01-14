@@ -1,6 +1,8 @@
 /target
 /incoming_csvs
 /screenshot
+/logs
+
 
 auto-scanner.db
 test_accounts.csv
