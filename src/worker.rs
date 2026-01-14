@@ -28,16 +28,29 @@ pub async fn run(
 
     let account = Account::new(username.clone(), password);
 
-    let adapter: Box<dyn BrowserAdapter> = match backend.as_str() {
-        "playwright" | "cdp" | "adspower" => Box::new(
-            PlaywrightAdapter::new(&remote_url)
-                .await
-                .context("Failed to initialize Playwright adapter in worker")?,
-        ),
-        _ => anyhow::bail!("Unsupported backend in worker: {}", backend),
+    // Initialize DB first to ensure we can log failures even if browser init fails
+    let db = Database::new("auto-scanner.db").await?;
+
+    let adapter_result: Result<Box<dyn BrowserAdapter>> = match backend.as_str() {
+        "playwright" | "cdp" | "adspower" => {
+            match PlaywrightAdapter::new(&remote_url).await {
+                Ok(adapter) => Ok(Box::new(adapter)),
+                Err(e) => Err(anyhow::anyhow!("Failed to initialize Playwright adapter: {}", e)),
+            }
+        },
+        _ => Err(anyhow::anyhow!("Unsupported backend in worker: {}", backend)),
     };
 
-    let db = Database::new("auto-scanner.db").await?;
+    let adapter = match adapter_result {
+        Ok(a) => a,
+        Err(e) => {
+            error!("Browser initialization failed for {}: {}", username, e);
+            // Log failure to DB? currently update_login_result assumes login attempted.
+            // We can treat this as a failed login attempt with no special status.
+            db.update_login_result(&username, false, None, None).await?;
+            return Err(e);
+        }
+    };
 
     match perform_login(adapter.as_ref(), &account, enable_screenshot).await {
         Ok(outcome) => {
