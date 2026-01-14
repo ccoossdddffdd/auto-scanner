@@ -5,5 +5,9 @@
 
 
 auto-scanner.db
+auto-scanner.db*
+
 test_accounts.csv
 .DS_Store
+
+*.pid
