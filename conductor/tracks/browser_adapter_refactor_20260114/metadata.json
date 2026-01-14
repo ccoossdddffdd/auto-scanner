@@ -1,0 +1,8 @@
+{
+  "track_id": "browser_adapter_refactor_20260114",
+  "type": "feature",
+  "status": "new",
+  "created_at": "2026-01-14T10:00:00Z",
+  "updated_at": "2026-01-14T10:00:00Z",
+  "description": "使用适配器模式，调用不同的浏览器后端，实现自动登录。"
+}
