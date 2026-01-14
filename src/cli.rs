@@ -7,6 +7,18 @@ pub struct Cli {
     /// Path to the CSV file containing account credentials
     #[arg(short, long, value_name = "FILE")]
     pub input: String,
+
+    /// Browser backend to use
+    #[arg(long, default_value = "playwright")]
+    pub backend: String,
+
+    /// Remote debugging URL for the browser
+    #[arg(long, default_value = "http://localhost:9222")]
+    pub remote_url: String,
+
+    /// Number of threads to use
+    #[arg(long, default_value = "1")]
+    pub thread_count: usize,
 }
 
 #[cfg(test)]

@@ -9,5 +9,5 @@ This file tracks all major tracks for the project. Each track has its own detail
 
 ---
 
-## [ ] Track: 使用适配器模式，调用不同的浏览器后端，实现自动登录。
+## [x] Track: 使用适配器模式，调用不同的浏览器后端，实现自动登录。
 *Link: [./conductor/tracks/browser_adapter_refactor_20260114/](./conductor/tracks/browser_adapter_refactor_20260114/)*
