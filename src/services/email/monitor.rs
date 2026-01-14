@@ -31,7 +31,7 @@ impl EmailConfig {
     pub fn from_env() -> Result<Self> {
         dotenv::dotenv().ok();
 
-        Ok(Self {
+        let config = Self {
             imap_server: Self::env_or("EMAIL_IMAP_SERVER", "outlook.office365.com"),
             imap_port: Self::env_parse("EMAIL_IMAP_PORT", 993)?,
             smtp_server: Self::env_or("EMAIL_SMTP_SERVER", "smtp.office365.com"),
@@ -43,7 +43,50 @@ impl EmailConfig {
             subject_filter: Self::env_or("EMAIL_SUBJECT_FILTER", "FB账号"),
             input_dir: Self::env_or("INPUT_DIR", "input").into(),
             doned_dir: Self::env_or("DONED_DIR", "input/doned").into(),
-        })
+        };
+
+        config.validate()?;
+        Ok(config)
+    }
+
+    /// 验证配置有效性
+    fn validate(&self) -> Result<()> {
+        // 验证端口范围
+        if self.imap_port == 0 {
+            anyhow::bail!("Invalid IMAP port: {}", self.imap_port);
+        }
+        if self.smtp_port == 0 {
+            anyhow::bail!("Invalid SMTP port: {}", self.smtp_port);
+        }
+
+        // 验证服务器地址
+        if self.imap_server.is_empty() {
+            anyhow::bail!("IMAP server cannot be empty");
+        }
+        if self.smtp_server.is_empty() {
+            anyhow::bail!("SMTP server cannot be empty");
+        }
+
+        // 验证轮询间隔
+        if self.poll_interval == 0 {
+            anyhow::bail!("Poll interval must be greater than 0");
+        }
+        if self.poll_interval > 3600 {
+            warn!(
+                "Poll interval {} is very long (>1 hour), is this intended?",
+                self.poll_interval
+            );
+        }
+
+        // 验证目录路径
+        if self.input_dir.to_str().is_none_or(|s| s.is_empty()) {
+            anyhow::bail!("Input directory path is invalid");
+        }
+        if self.doned_dir.to_str().is_none_or(|s| s.is_empty()) {
+            anyhow::bail!("Doned directory path is invalid");
+        }
+
+        Ok(())
     }
 
     /// 读取环境变量或使用默认值
@@ -160,29 +203,8 @@ impl EmailMonitor {
 
     /// 检查并处理新邮件
     async fn check_and_process_emails(&self) -> Result<()> {
-        let imap_client = ImapClient::new(
-            self.config.imap_server.clone(),
-            self.config.imap_port,
-            self.config.username.clone(),
-            self.config.password.clone(),
-        );
-        let mut session = imap_client.connect().await?;
-
-        // 选择收件箱
-        let inbox = session
-            .select("INBOX")
-            .await
-            .context("Failed to select INBOX")?;
-
-        info!("Mailbox selected: {:?}", inbox);
-
-        // 搜索未读邮件
-        let search_result = session
-            .search("UNSEEN")
-            .await
-            .context("Failed to search for unread emails")?;
-
-        let uid_set: Vec<u32> = search_result.iter().copied().collect();
+        let mut session = self.create_imap_session().await?;
+        let uid_set = self.search_unread_emails(&mut session).await?;
 
         if uid_set.is_empty() {
             info!("No new unread emails found");
@@ -194,19 +216,51 @@ impl EmailMonitor {
         }
 
         info!("Found {} unread emails", uid_set.len());
-
-        // 处理每封邮件
-        for uid in &uid_set {
-            if let Err(e) = self.fetch_and_process_email(*uid, &mut session).await {
-                error!("Failed to process email UID {}: {}", uid, e);
-            }
-        }
+        self.process_email_batch(&uid_set, &mut session).await?;
 
         session
             .logout()
             .await
             .context("Failed to logout from IMAP")?;
 
+        Ok(())
+    }
+
+    /// 创建 IMAP 会话
+    async fn create_imap_session(&self) -> Result<ImapSession> {
+        let imap_client = ImapClient::new(
+            self.config.imap_server.clone(),
+            self.config.imap_port,
+            self.config.username.clone(),
+            self.config.password.clone(),
+        );
+        imap_client.connect().await
+    }
+
+    /// 搜索未读邮件
+    async fn search_unread_emails(&self, session: &mut ImapSession) -> Result<Vec<u32>> {
+        let inbox = session
+            .select("INBOX")
+            .await
+            .context("Failed to select INBOX")?;
+
+        info!("Mailbox selected: {:?}", inbox);
+
+        let search_result = session
+            .search("UNSEEN")
+            .await
+            .context("Failed to search for unread emails")?;
+
+        Ok(search_result.iter().copied().collect())
+    }
+
+    /// 批量处理邮件
+    async fn process_email_batch(&self, uids: &[u32], session: &mut ImapSession) -> Result<()> {
+        for uid in uids {
+            if let Err(e) = self.fetch_and_process_email(*uid, session).await {
+                error!("Failed to process email UID {}: {}", uid, e);
+            }
+        }
         Ok(())
     }
 

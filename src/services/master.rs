@@ -19,6 +19,141 @@ use tracing::{error, info, warn};
 
 const PID_FILE: &str = "auto-scanner-master.pid";
 
+/// Master 上下文 - 包含所有运行时状态
+struct MasterContext {
+    input_path: PathBuf,
+    doned_dir: PathBuf,
+    adspower: Option<Arc<AdsPowerClient>>,
+    exe_path: PathBuf,
+    email_monitor: Option<Arc<EmailMonitor>>,
+    permit_rx: async_channel::Receiver<usize>,
+    permit_tx: async_channel::Sender<usize>,
+    processing_files: Arc<std::sync::Mutex<HashSet<PathBuf>>>,
+}
+
+impl MasterContext {
+    /// 初始化 Master 上下文
+    async fn initialize(config: &MasterConfig, input_dir: String) -> Result<Self> {
+        let input_path = PathBuf::from(&input_dir);
+        if !input_path.exists() {
+            fs::create_dir_all(&input_path).context("Failed to create monitoring directory")?;
+        }
+
+        let doned_dir =
+            PathBuf::from(std::env::var("DONED_DIR").unwrap_or_else(|_| "input/doned".to_string()));
+        if !doned_dir.exists() {
+            fs::create_dir_all(&doned_dir).context("Failed to create doned directory")?;
+        }
+
+        let adspower = if config.backend == "adspower" {
+            Some(Arc::new(AdsPowerClient::new()))
+        } else {
+            None
+        };
+
+        let email_monitor = initialize_email_monitor(config).await;
+
+        let (permit_tx, permit_rx) = async_channel::bounded(config.thread_count);
+        for i in 0..config.thread_count {
+            permit_tx
+                .send(i)
+                .await
+                .expect("Failed to initialize thread pool");
+        }
+
+        let exe_path = if let Some(path) = config.exe_path.clone() {
+            path
+        } else {
+            env::current_exe().context("Failed to get current executable path")?
+        };
+
+        Ok(Self {
+            input_path,
+            doned_dir,
+            adspower,
+            exe_path,
+            email_monitor,
+            permit_rx,
+            permit_tx,
+            processing_files: Arc::new(std::sync::Mutex::new(HashSet::new())),
+        })
+    }
+}
+
+/// 文件处理器
+struct FileProcessingHandler {
+    config: MasterConfig,
+    context: Arc<MasterContext>,
+}
+
+impl FileProcessingHandler {
+    fn new(config: MasterConfig, context: Arc<MasterContext>) -> Self {
+        Self { config, context }
+    }
+
+    /// 处理传入的文件
+    async fn handle_incoming_file(&self, csv_path: PathBuf) {
+        if !csv_path.exists() {
+            let mut processing = self.context.processing_files.lock().unwrap();
+            processing.remove(&csv_path);
+            return;
+        }
+
+        info!("Processing file: {:?}", csv_path);
+        let batch_name = csv_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+
+        let process_config = self.build_process_config(batch_name.clone());
+
+        let result = process_file(
+            &csv_path,
+            &batch_name,
+            process_config,
+            self.context.permit_rx.clone(),
+            self.context.permit_tx.clone(),
+            self.context.email_monitor.clone(),
+        )
+        .await;
+
+        {
+            let mut processing = self.context.processing_files.lock().unwrap();
+            processing.remove(&csv_path);
+        }
+
+        match result {
+            Ok(processed_path) => {
+                info!("Finished processing file: {:?}", processed_path);
+            }
+            Err(e) => {
+                error!("Error processing file {:?}: {}", csv_path, e);
+            }
+        }
+    }
+
+    /// 构建处理配置
+    fn build_process_config(&self, batch_name: String) -> ProcessConfig {
+        let browser_config = BrowserConfig {
+            backend: self.config.backend.clone(),
+            remote_url: self.config.remote_url.clone(),
+            adspower: self.context.adspower.clone(),
+        };
+
+        let worker_config = WorkerConfig {
+            exe_path: self.context.exe_path.clone(),
+            enable_screenshot: self.config.enable_screenshot,
+        };
+
+        let file_config = FileConfig {
+            doned_dir: self.context.doned_dir.clone(),
+        };
+
+        ProcessConfig::new(batch_name, browser_config, worker_config, file_config)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct MasterConfig {
     pub backend: String,
@@ -129,35 +264,19 @@ pub async fn run(input_dir: Option<String>, config: MasterConfig) -> Result<()> 
         pid_manager.write_pid()?;
     }
 
-    let adspower = if config.backend == "adspower" {
-        Some(Arc::new(AdsPowerClient::new()))
-    } else {
-        None
-    };
-
-    let input_path = PathBuf::from(&input_dir);
-
-    if !input_path.exists() {
-        fs::create_dir_all(&input_path).context("Failed to create monitoring directory")?;
-    }
-
-    let doned_dir =
-        PathBuf::from(std::env::var("DONED_DIR").unwrap_or_else(|_| "input/doned".to_string()));
-    if !doned_dir.exists() {
-        fs::create_dir_all(&doned_dir).context("Failed to create doned directory")?;
-    }
+    // 初始化上下文
+    let context = Arc::new(MasterContext::initialize(&config, input_dir).await?);
 
     let (tx, mut rx) = mpsc::channel::<PathBuf>(100);
-    let processing_files = Arc::new(std::sync::Mutex::new(HashSet::new()));
 
-    // Scan for existing files
-    let entries = fs::read_dir(&input_path)?;
+    // 扫描现有文件
+    let entries = fs::read_dir(&context.input_path)?;
     for entry in entries {
         let entry = entry?;
         let path = entry.path();
         if is_supported_file(&path) {
             let should_process = {
-                let mut processing = processing_files.lock().unwrap();
+                let mut processing = context.processing_files.lock().unwrap();
                 processing.insert(path.clone())
             };
             if should_process {
@@ -166,26 +285,16 @@ pub async fn run(input_dir: Option<String>, config: MasterConfig) -> Result<()> 
         }
     }
 
-    // Setup file watcher
-    let mut watcher = create_file_watcher(&input_path, tx.clone(), processing_files.clone())?;
-    watcher.watch(&input_path, RecursiveMode::NonRecursive)?;
+    // 设置文件监控器
+    let mut watcher = create_file_watcher(
+        &context.input_path,
+        tx.clone(),
+        context.processing_files.clone(),
+    )?;
+    watcher.watch(&context.input_path, RecursiveMode::NonRecursive)?;
 
-    // Initialize email monitor
-    let email_monitor_instance = initialize_email_monitor(&config).await;
-
-    let (permit_tx, permit_rx) = async_channel::bounded(config.thread_count);
-    for i in 0..config.thread_count {
-        permit_tx
-            .send(i)
-            .await
-            .expect("Failed to initialize thread pool");
-    }
-
-    let exe_path = if let Some(path) = config.exe_path.clone() {
-        path
-    } else {
-        env::current_exe().context("Failed to get current executable path")?
-    };
+    // 创建文件处理器
+    let handler = FileProcessingHandler::new(config, context);
 
     info!("Waiting for new files...");
 
@@ -203,64 +312,7 @@ pub async fn run(input_dir: Option<String>, config: MasterConfig) -> Result<()> 
                 break;
             }
             Some(csv_path) = rx.recv() => {
-                 if !csv_path.exists() {
-                    let mut processing = processing_files.lock().unwrap();
-                    processing.remove(&csv_path);
-                    continue;
-                }
-
-                info!("Processing file: {:?}", csv_path);
-                let batch_name = csv_path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("unknown")
-                    .to_string();
-
-                let browser_config = BrowserConfig {
-                    backend: config.backend.clone(),
-                    remote_url: config.remote_url.clone(),
-                    adspower: adspower.clone(),
-                };
-
-                let worker_config = WorkerConfig {
-                    exe_path: exe_path.clone(),
-                    enable_screenshot: config.enable_screenshot,
-                };
-
-                let file_config = FileConfig {
-                    doned_dir: doned_dir.clone(),
-                };
-
-                let process_config = ProcessConfig::new(
-                    batch_name.clone(),
-                    browser_config,
-                    worker_config,
-                    file_config,
-                );
-
-                let result = process_file(
-                    &csv_path,
-                    &batch_name,
-                    process_config,
-                    permit_rx.clone(),
-                    permit_tx.clone(),
-                    email_monitor_instance.clone(),
-                )
-                .await;
-
-                {
-                    let mut processing = processing_files.lock().unwrap();
-                    processing.remove(&csv_path);
-                }
-
-                match result {
-                    Ok(processed_path) => {
-                        info!("Finished processing file: {:?}", processed_path);
-                    }
-                    Err(e) => {
-                        error!("Error processing file {:?}: {}", csv_path, e);
-                    }
-                }
+                handler.handle_incoming_file(csv_path).await;
             }
         }
     }
