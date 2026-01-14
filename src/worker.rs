@@ -29,7 +29,7 @@ pub async fn run(
     let account = Account::new(username.clone(), password);
 
     let adapter: Box<dyn BrowserAdapter> = match backend.as_str() {
-        "playwright" | "cdp" => Box::new(
+        "playwright" | "cdp" | "adspower" => Box::new(
             PlaywrightAdapter::new(&remote_url)
                 .await
                 .context("Failed to initialize Playwright adapter in worker")?,
