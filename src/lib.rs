@@ -1,11 +1,8 @@
-pub mod adspower;
-pub mod browser;
-pub mod cli;
-pub mod csv_reader;
-pub mod email_monitor;
-pub mod email_sender;
-pub mod excel_handler;
-pub mod file_tracker;
+pub mod core;
+pub mod infrastructure;
+pub mod services;
+
 pub mod master;
-pub mod models;
+pub mod processor;
+pub mod strategies;
 pub mod worker;

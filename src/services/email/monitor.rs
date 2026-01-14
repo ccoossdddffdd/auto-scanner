@@ -1,5 +1,6 @@
-use crate::email_sender::EmailSender;
-use crate::file_tracker::FileTracker;
+use crate::infrastructure::imap::{ImapClient, ImapSession};
+use crate::services::email::sender::EmailSender;
+use crate::services::email::tracker::FileTracker;
 use anyhow::{Context, Result};
 use chrono::Local;
 use futures::StreamExt;
@@ -7,8 +8,6 @@ use mail_parser::{Message, MessageParser, MimeHeaders};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::net::TcpStream;
-use tokio_native_tls::TlsConnector;
 use tracing::{error, info, warn};
 
 /// 邮件配置
@@ -77,19 +76,6 @@ pub struct Attachment {
     pub size: usize,
 }
 
-/// Convenience alias for an authenticated IMAP session.
-type ImapSession = async_imap::Session<tokio_native_tls::TlsStream<TcpStream>>;
-
-/// 邮件信息
-#[derive(Debug, Clone)]
-pub struct EmailInfo {
-    pub uid: u32,
-    pub from: String,
-    pub subject: String,
-    pub attachments: Vec<Attachment>,
-    pub received_at: chrono::DateTime<Local>,
-}
-
 /// 邮件监控器
 pub struct EmailMonitor {
     config: EmailConfig,
@@ -153,7 +139,13 @@ impl EmailMonitor {
 
     /// 检查并处理新邮件
     async fn check_and_process_emails(&self) -> Result<()> {
-        let mut session = self.connect_imap().await?;
+        let imap_client = ImapClient::new(
+            self.config.imap_server.clone(),
+            self.config.imap_port,
+            self.config.username.clone(),
+            self.config.password.clone(),
+        );
+        let mut session = imap_client.connect().await?;
 
         // 选择收件箱
         let inbox = session
@@ -195,37 +187,6 @@ impl EmailMonitor {
             .context("Failed to logout from IMAP")?;
 
         Ok(())
-    }
-
-    /// 连接到IMAP服务器
-    async fn connect_imap(&self) -> Result<ImapSession> {
-        info!("Connecting to IMAP server...");
-
-        let tcp_stream =
-            TcpStream::connect((self.config.imap_server.as_str(), self.config.imap_port))
-                .await
-                .context("Failed to connect to IMAP server (TCP)")?;
-
-        let native_tls = native_tls::TlsConnector::builder()
-            .build()
-            .context("Failed to create TLS connector")?;
-        let connector = TlsConnector::from(native_tls);
-
-        let tls_stream = connector
-            .connect(&self.config.imap_server, tcp_stream)
-            .await
-            .context("Failed to establish TLS connection")?;
-
-        let client = async_imap::Client::new(tls_stream);
-
-        let session = client
-            .login(&self.config.username, &self.config.password)
-            .await
-            .map_err(|e| e.0)
-            .context("IMAP authentication failed")?;
-
-        info!("Successfully connected to IMAP server");
-        Ok(session)
     }
 
     /// 获取并处理单个邮件

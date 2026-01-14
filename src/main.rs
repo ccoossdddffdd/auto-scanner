@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use auto_scanner::cli::{Cli, Commands};
+use auto_scanner::core::cli::{Cli, Commands};
 use auto_scanner::master;
 use auto_scanner::worker;
 use clap::Parser;

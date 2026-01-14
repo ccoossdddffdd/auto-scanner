@@ -1,4 +1,4 @@
-use crate::models::Account;
+use crate::core::models::Account;
 use anyhow::{Context, Result};
 use std::path::Path;
 use tracing::{info, warn};
