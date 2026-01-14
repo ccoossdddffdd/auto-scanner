@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use thiserror::Error;
 
-pub mod playwright_adapter;
 pub mod mock_adapter;
+pub mod playwright_adapter;
 
 #[derive(Error, Debug)]
 pub enum BrowserError {

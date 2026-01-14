@@ -1,4 +1,4 @@
-use crate::core::models::WorkerResult;
+use crate::core::models::{Account, WorkerResult};
 use crate::infrastructure::adspower::AdsPowerClient;
 use crate::services::email::monitor::EmailMonitor;
 use crate::services::file::get_account_source;
@@ -21,6 +21,230 @@ pub struct ProcessConfig {
     pub doned_dir: PathBuf,
 }
 
+#[derive(Clone)]
+struct WorkerCoordinator {
+    permit_rx: async_channel::Receiver<usize>,
+    permit_tx: async_channel::Sender<usize>,
+    adspower: Option<Arc<AdsPowerClient>>,
+    exe_path: PathBuf,
+    backend: String,
+    remote_url: String,
+    enable_screenshot: bool,
+}
+
+impl WorkerCoordinator {
+    async fn spawn_worker(&self, index: usize, account: &Account) -> (usize, Option<WorkerResult>) {
+        let thread_index = self.permit_rx.recv().await.unwrap();
+
+        let username = account.username.clone();
+        let password = account.password.clone();
+
+        info!(
+            "Spawning worker for {} on thread {}",
+            username, thread_index
+        );
+
+        let mut adspower_id = None;
+        let mut active_remote_url = self.remote_url.clone();
+
+        if let Some(client) = &self.adspower {
+            match client.ensure_profile_for_thread(thread_index).await {
+                Ok(id) => {
+                    if let Err(e) = client.update_profile_for_account(&id, &username).await {
+                        error!("Failed to update AdsPower profile for {}: {}", username, e);
+                        let _ = self.permit_tx.send(thread_index).await;
+                        return (index, None);
+                    }
+
+                    match client.start_browser(&id).await {
+                        Ok(ws_url) => {
+                            adspower_id = Some(id);
+                            active_remote_url = ws_url;
+                        }
+                        Err(e) => {
+                            error!("Failed to start AdsPower browser for {}: {}", username, e);
+                            let _ = self.permit_tx.send(thread_index).await;
+                            return (index, None);
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!(
+                        "Failed to check/create AdsPower profile for thread {}: {}",
+                        thread_index, e
+                    );
+                    let _ = self.permit_tx.send(thread_index).await;
+                    return (index, None);
+                }
+            }
+        }
+
+        let mut cmd = Command::new(&self.exe_path);
+        cmd.arg("worker")
+            .arg("--username")
+            .arg(&username)
+            .arg("--password")
+            .arg(&password)
+            .arg("--remote-url")
+            .arg(&active_remote_url)
+            .arg("--backend")
+            .arg(&self.backend);
+
+        if self.enable_screenshot {
+            cmd.arg("--enable-screenshot");
+        }
+
+        let output = cmd.output().await;
+
+        if let Some(client) = &self.adspower {
+            if let Some(id) = adspower_id {
+                let _ = client.stop_browser(&id).await;
+            }
+        }
+
+        let _ = self.permit_tx.send(thread_index).await;
+
+        match output {
+            Ok(out) => {
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                for line in stdout.lines() {
+                    if let Some(json_str) = line.strip_prefix("RESULT_JSON:") {
+                        if let Ok(result) = serde_json::from_str::<WorkerResult>(json_str) {
+                            return (index, Some(result));
+                        }
+                    }
+                }
+                error!("Worker for {} did not return valid JSON result", username);
+                (index, None)
+            }
+            Err(e) => {
+                error!("Failed to run worker for {}: {}", username, e);
+                (index, None)
+            }
+        }
+    }
+}
+
+async fn prepare_input_file(
+    path: &Path,
+    email_monitor: &Option<Arc<EmailMonitor>>,
+) -> Result<PathBuf> {
+    let extension = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    if extension != "txt" {
+        return Ok(path.to_path_buf());
+    }
+
+    let new_path = convert_txt_to_csv(path).await?;
+
+    if let Some(monitor) = email_monitor {
+        if let Err(e) = monitor.get_file_tracker().update_file_path(path, &new_path) {
+            warn!("Failed to update file tracker path: {}", e);
+        }
+    }
+
+    fs::remove_file(path).context("Failed to remove original TXT file")?;
+    info!("Converted {:?} to CSV and removed original", path);
+
+    Ok(new_path)
+}
+
+async fn write_results_and_rename(
+    path: &Path,
+    extension: &str,
+    results: Vec<(usize, Option<WorkerResult>)>,
+    records: Vec<Vec<String>>,
+    headers: Vec<String>,
+    doned_dir: &Path,
+) -> Result<PathBuf> {
+    let source = get_account_source(path);
+
+    let mut new_headers = headers.clone();
+    new_headers.push("状态".to_string());
+    new_headers.push("验证码".to_string());
+    new_headers.push("2FA".to_string());
+    new_headers.push("信息".to_string());
+
+    let mut new_records = Vec::new();
+    for (idx, worker_res_opt) in results {
+        if let Some(record) = records.get(idx) {
+            let mut new_record = record.clone();
+            if let Some(res) = worker_res_opt {
+                new_record.push(res.status);
+                new_record.push(res.captcha);
+                new_record.push(res.two_fa);
+                new_record.push(res.message);
+            } else {
+                new_record.push("系统错误".to_string());
+                new_record.push("未知".to_string());
+                new_record.push("未知".to_string());
+                new_record.push("Worker 执行失败".to_string());
+            }
+            new_records.push(new_record);
+        }
+    }
+
+    source.write(path, &new_headers, &new_records).await?;
+    info!("Results written back to {:?}", path);
+
+    if extension == "xls" {
+        let new_xlsx_path = path.with_extension("xlsx");
+        fs::rename(path, &new_xlsx_path).context("Failed to rename .xls to .xlsx")?;
+        info!("Renamed processed .xls to .xlsx: {:?}", new_xlsx_path);
+        rename_processed_file(&new_xlsx_path, doned_dir)
+    } else {
+        rename_processed_file(path, doned_dir)
+    }
+}
+
+async fn handle_email_notification(
+    email_monitor: &Option<Arc<EmailMonitor>>,
+    email_id: &Option<String>,
+    result: &Result<PathBuf>,
+) {
+    if let (Some(monitor), Some(id)) = (email_monitor, email_id) {
+        let metadata = monitor.get_file_tracker().get_email_metadata(id);
+        let from = metadata.map(|m| m.from).unwrap_or_default();
+
+        match result {
+            Ok(final_path) => {
+                info!("Sending success notification to {}", from);
+                if let Err(e) = monitor
+                    .send_success_notification(&from, final_path.clone())
+                    .await
+                {
+                    error!("Failed to send success notification: {}", e);
+                }
+                if let Err(e) = monitor
+                    .get_file_tracker()
+                    .mark_success(id, final_path.clone())
+                {
+                    warn!("Failed to mark success in tracker: {}", e);
+                }
+            }
+            Err(e) => {
+                info!("Sending failure notification to {}", from);
+                if let Err(e) = monitor
+                    .send_failure_notification(&from, &e.to_string(), None)
+                    .await
+                {
+                    error!("Failed to send failure notification: {}", e);
+                }
+                if let Err(e) = monitor
+                    .get_file_tracker()
+                    .mark_failed(id, e.to_string(), None)
+                {
+                    warn!("Failed to mark failed in tracker: {}", e);
+                }
+            }
+        }
+    }
+}
+
 pub async fn process_file(
     path: &Path,
     batch_name: &str,
@@ -34,28 +258,9 @@ pub async fn process_file(
         .and_then(|e| e.to_str())
         .unwrap_or("")
         .to_lowercase();
-    let is_txt = extension == "txt";
 
-    // Handle TXT to CSV conversion
-    let path_to_process = if is_txt {
-        let new_path = convert_txt_to_csv(path).await?;
+    let path_to_process = prepare_input_file(path, &email_monitor).await?;
 
-        // Update file tracker mapping
-        if let Some(monitor) = &email_monitor {
-            if let Err(e) = monitor.get_file_tracker().update_file_path(path, &new_path) {
-                warn!("Failed to update file tracker path: {}", e);
-            }
-        }
-
-        // We delete the original txt file as requested
-        fs::remove_file(path).context("Failed to remove original TXT file")?;
-        info!("Converted {:?} to CSV and removed original", path);
-        new_path
-    } else {
-        path.to_path_buf()
-    };
-
-    // Lookup Email ID
     let email_id = if let Some(monitor) = &email_monitor {
         let filename = path_to_process
             .file_name()
@@ -67,118 +272,26 @@ pub async fn process_file(
     };
 
     let processing_result = async {
-        // Read accounts and original records/headers
         let source = get_account_source(&path_to_process);
         let (accounts, records, headers) = source.read(&path_to_process).await?;
 
         info!("Read {} accounts from {}", accounts.len(), batch_name);
 
+        let coordinator = WorkerCoordinator {
+            permit_rx,
+            permit_tx,
+            adspower: config.adspower.clone(),
+            exe_path: config.exe_path.clone(),
+            backend: config.backend.clone(),
+            remote_url: config.remote_url.clone(),
+            enable_screenshot: config.enable_screenshot,
+        };
+
         let mut handles = Vec::new();
-
         for (index, account) in accounts.iter().enumerate() {
-            let thread_index = permit_rx.recv().await.unwrap();
-
-            let exe_path = config.exe_path.clone();
-            let username = account.username.clone();
-            let password = account.password.clone();
-            let backend_str = config.backend.clone();
-            let remote_url_str = config.remote_url.clone();
-
-            let adspower = config.adspower.clone();
-            let permit_tx = permit_tx.clone();
-
-            let handle = tokio::spawn(async move {
-                info!(
-                    "Spawning worker for {} on thread {}",
-                    username, thread_index
-                );
-
-                let mut adspower_id = None;
-                let mut active_remote_url = remote_url_str.clone();
-
-                if let Some(client) = &adspower {
-                    match client.ensure_profile_for_thread(thread_index).await {
-                        Ok(id) => {
-                            if let Err(e) = client.update_profile_for_account(&id, &username).await
-                            {
-                                error!("Failed to update AdsPower profile for {}: {}", username, e);
-                                let _ = permit_tx.send(thread_index).await;
-                                return (index, None);
-                            }
-
-                            match client.start_browser(&id).await {
-                                Ok(ws_url) => {
-                                    adspower_id = Some(id);
-                                    active_remote_url = ws_url;
-                                }
-                                Err(e) => {
-                                    error!(
-                                        "Failed to start AdsPower browser for {}: {}",
-                                        username, e
-                                    );
-                                    let _ = permit_tx.send(thread_index).await;
-                                    return (index, None);
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            error!(
-                                "Failed to check/create AdsPower profile for thread {}: {}",
-                                thread_index, e
-                            );
-                            let _ = permit_tx.send(thread_index).await;
-                            return (index, None);
-                        }
-                    }
-                }
-
-                let mut cmd = Command::new(exe_path);
-                cmd.arg("worker")
-                    .arg("--username")
-                    .arg(&username)
-                    .arg("--password")
-                    .arg(&password)
-                    .arg("--remote-url")
-                    .arg(&active_remote_url)
-                    .arg("--backend")
-                    .arg(&backend_str);
-
-                if config.enable_screenshot {
-                    cmd.arg("--enable-screenshot");
-                }
-
-                // Capture output
-                let output = cmd.output().await;
-
-                if let Some(client) = &adspower {
-                    if let Some(id) = adspower_id {
-                        let _ = client.stop_browser(&id).await;
-                    }
-                }
-
-                let _ = permit_tx.send(thread_index).await;
-
-                match output {
-                    Ok(out) => {
-                        let stdout = String::from_utf8_lossy(&out.stdout);
-                        // Find JSON result
-                        for line in stdout.lines() {
-                            if let Some(json_str) = line.strip_prefix("RESULT_JSON:") {
-                                if let Ok(result) = serde_json::from_str::<WorkerResult>(json_str) {
-                                    return (index, Some(result));
-                                }
-                            }
-                        }
-                        error!("Worker for {} did not return valid JSON result", username);
-                        (index, None)
-                    }
-                    Err(e) => {
-                        error!("Failed to run worker for {}: {}", username, e);
-                        (index, None)
-                    }
-                }
-            });
-
+            let coord = coordinator.clone();
+            let account = account.clone();
+            let handle = tokio::spawn(async move { coord.spawn_worker(index, &account).await });
             handles.push(handle);
         }
 
@@ -189,97 +302,21 @@ pub async fn process_file(
             }
         }
 
-        // Sort by index to maintain original order
         results.sort_by_key(|k| k.0);
 
-        // Overwrite the original file
-        // Write Headers
-        let mut new_headers = headers.clone();
-        new_headers.push("状态".to_string());
-        new_headers.push("验证码".to_string());
-        new_headers.push("2FA".to_string());
-        new_headers.push("信息".to_string());
-
-        let mut new_records = Vec::new();
-        for (idx, worker_res_opt) in results {
-            if let Some(record) = records.get(idx) {
-                let mut new_record = record.clone();
-                if let Some(res) = worker_res_opt {
-                    new_record.push(res.status);
-                    new_record.push(res.captcha);
-                    new_record.push(res.two_fa);
-                    new_record.push(res.message);
-                } else {
-                    new_record.push("系统错误".to_string());
-                    new_record.push("未知".to_string());
-                    new_record.push("未知".to_string());
-                    new_record.push("Worker 执行失败".to_string());
-                }
-                new_records.push(new_record);
-            }
-        }
-        source
-            .write(&path_to_process, &new_headers, &new_records)
-            .await?;
-
-        info!("Results written back to {:?}", path_to_process);
-
-        if extension == "xls" {
-            // The write_results_to_excel function writes XLSX format.
-            // If we passed a .xls path, the file content is now XLSX but extension is .xls.
-            // We should rename it to .xlsx
-            let new_xlsx_path = path_to_process.with_extension("xlsx");
-            fs::rename(&path_to_process, &new_xlsx_path)
-                .context("Failed to rename .xls to .xlsx")?;
-            info!("Renamed processed .xls to .xlsx: {:?}", new_xlsx_path);
-            // Original .xls is effectively "deleted" (replaced/renamed)
-            rename_processed_file(&new_xlsx_path, &config.doned_dir)
-        } else {
-            rename_processed_file(&path_to_process, &config.doned_dir)
-        }
+        write_results_and_rename(
+            &path_to_process,
+            &extension,
+            results,
+            records,
+            headers,
+            &config.doned_dir,
+        )
+        .await
     }
     .await;
 
-    // Handle Notifications
-    if let Some(monitor) = &email_monitor {
-        if let Some(id) = email_id {
-            let metadata = monitor.get_file_tracker().get_email_metadata(&id);
-            let from = metadata.map(|m| m.from).unwrap_or_default();
-
-            match &processing_result {
-                Ok(final_path) => {
-                    info!("Sending success notification to {}", from);
-                    if let Err(e) = monitor
-                        .send_success_notification(&from, final_path.clone())
-                        .await
-                    {
-                        error!("Failed to send success notification: {}", e);
-                    }
-                    if let Err(e) = monitor
-                        .get_file_tracker()
-                        .mark_success(&id, final_path.clone())
-                    {
-                        warn!("Failed to mark success in tracker: {}", e);
-                    }
-                }
-                Err(e) => {
-                    info!("Sending failure notification to {}", from);
-                    if let Err(e) = monitor
-                        .send_failure_notification(&from, &e.to_string(), None)
-                        .await
-                    {
-                        error!("Failed to send failure notification: {}", e);
-                    }
-                    if let Err(e) = monitor
-                        .get_file_tracker()
-                        .mark_failed(&id, e.to_string(), None)
-                    {
-                        warn!("Failed to mark failed in tracker: {}", e);
-                    }
-                }
-            }
-        }
-    }
+    handle_email_notification(&email_monitor, &email_id, &processing_result).await;
 
     processing_result
 }

@@ -8,6 +8,7 @@ use std::fs;
 use std::path::Path;
 use tracing::info;
 
+#[derive(Default)]
 pub struct FacebookLoginStrategy;
 
 impl FacebookLoginStrategy {
@@ -85,7 +86,8 @@ impl LoginStrategy for FacebookLoginStrategy {
             info!("Taking screenshot...");
             let screenshot_dir = Path::new("screenshot");
             if !screenshot_dir.exists() {
-                fs::create_dir_all(screenshot_dir).context("Failed to create screenshot directory")?;
+                fs::create_dir_all(screenshot_dir)
+                    .context("Failed to create screenshot directory")?;
             }
 
             let timestamp = Local::now().format("%Y%m%d-%H%M%S");

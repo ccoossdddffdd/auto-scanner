@@ -35,21 +35,19 @@ impl AccountSource for CsvSource {
 
         for (index, result) in reader.records().enumerate() {
             match result {
-                Ok(record) => {
-                    match record.deserialize(Some(&headers_record)) {
-                        Ok(account) => {
-                            accounts.push(account);
-                            records.push(record.iter().map(|s| s.to_string()).collect());
-                        }
-                        Err(e) => {
-                            warn!(
-                                "Skipping row {} due to deserialization error: {}",
-                                index + 1,
-                                e
-                            );
-                        }
+                Ok(record) => match record.deserialize(Some(&headers_record)) {
+                    Ok(account) => {
+                        accounts.push(account);
+                        records.push(record.iter().map(|s| s.to_string()).collect());
                     }
-                }
+                    Err(e) => {
+                        warn!(
+                            "Skipping row {} due to deserialization error: {}",
+                            index + 1,
+                            e
+                        );
+                    }
+                },
                 Err(e) => {
                     warn!("Skipping row {} due to parse error: {}", index + 1, e);
                 }

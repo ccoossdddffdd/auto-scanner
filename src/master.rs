@@ -32,19 +32,7 @@ pub struct MasterConfig {
     pub exe_path: Option<PathBuf>,
 }
 
-pub async fn run(input_dir: Option<String>, config: MasterConfig) -> Result<()> {
-    // Load .env file
-    dotenv::dotenv().ok();
-
-    if config.status {
-        return check_status();
-    }
-
-    if config.stop {
-        return stop_master();
-    }
-
-    // Initialize logging
+fn initialize_logging() -> Result<()> {
     let file_appender = tracing_appender::rolling::daily("logs", "auto-scanner.log");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
@@ -60,6 +48,113 @@ pub async fn run(input_dir: Option<String>, config: MasterConfig) -> Result<()> 
         )
         .init();
 
+    Ok(())
+}
+
+fn setup_pid_management(daemon: bool) -> Result<()> {
+    if daemon {
+        return Ok(());
+    }
+
+    let pid = std::process::id();
+    if Path::new(PID_FILE).exists() {
+        if let Ok(content) = fs::read_to_string(PID_FILE) {
+            if let Ok(old_pid) = content.trim().parse::<i32>() {
+                if check_process_running(old_pid) {
+                    anyhow::bail!("Master process is already running (PID: {})", old_pid);
+                }
+            }
+        }
+    }
+    fs::write(PID_FILE, pid.to_string()).context("Failed to write PID file")?;
+    info!("Written PID {} to {}", pid, PID_FILE);
+
+    Ok(())
+}
+
+fn create_file_watcher(
+    _input_path: &Path,
+    tx: mpsc::Sender<PathBuf>,
+    processing_files: Arc<std::sync::Mutex<HashSet<PathBuf>>>,
+) -> Result<RecommendedWatcher> {
+    let watcher = RecommendedWatcher::new(
+        move |res: notify::Result<notify::Event>| match res {
+            Ok(event) => {
+                if let EventKind::Create(_) = event.kind {
+                    info!("Received file event: {:?}", event.kind);
+                    for path in event.paths {
+                        if is_supported_file(&path) {
+                            let mut processing = processing_files.lock().unwrap();
+                            if processing.insert(path.clone()) {
+                                info!("Detected new file: {:?}", path);
+                                let _ = tx.try_send(path);
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => error!("Watch error: {:?}", e),
+        },
+        Config::default(),
+    )?;
+
+    Ok(watcher)
+}
+
+async fn initialize_email_monitor(config: &MasterConfig) -> Option<Arc<EmailMonitor>> {
+    if !config.enable_email_monitor {
+        return None;
+    }
+
+    info!("Email monitoring enabled");
+
+    let file_tracker = Arc::new(FileTracker::new());
+    let email_config = match EmailConfig::from_env() {
+        Ok(config) => config,
+        Err(e) => {
+            warn!(
+                "Failed to create email config: {}, disabling email monitoring",
+                e
+            );
+            return None;
+        }
+    };
+
+    match EmailMonitor::new(email_config, file_tracker.clone()) {
+        Ok(monitor) => {
+            let monitor = Arc::new(monitor);
+            let monitor_clone = monitor.clone();
+            tokio::spawn(async move {
+                info!("Email monitor task started");
+                if let Err(e) = monitor_clone.start_monitoring().await {
+                    error!("Email monitor failed: {}", e);
+                }
+            });
+            Some(monitor)
+        }
+        Err(e) => {
+            warn!(
+                "Failed to create email monitor: {}, disabling email monitoring",
+                e
+            );
+            None
+        }
+    }
+}
+
+pub async fn run(input_dir: Option<String>, config: MasterConfig) -> Result<()> {
+    dotenv::dotenv().ok();
+
+    if config.status {
+        return check_status();
+    }
+
+    if config.stop {
+        return stop_master();
+    }
+
+    initialize_logging()?;
+
     let input_dir = input_dir.expect("Input directory is required unless --stop is specified");
 
     info!(
@@ -67,20 +162,7 @@ pub async fn run(input_dir: Option<String>, config: MasterConfig) -> Result<()> 
         input_dir, config.thread_count, config.enable_screenshot, config.backend, config.daemon
     );
 
-    if !config.daemon {
-        let pid = std::process::id();
-        if Path::new(PID_FILE).exists() {
-            if let Ok(content) = fs::read_to_string(PID_FILE) {
-                if let Ok(old_pid) = content.trim().parse::<i32>() {
-                    if check_process_running(old_pid) {
-                        anyhow::bail!("Master process is already running (PID: {})", old_pid);
-                    }
-                }
-            }
-        }
-        fs::write(PID_FILE, pid.to_string()).context("Failed to write PID file")?;
-        info!("Written PID {} to {}", pid, PID_FILE);
-    }
+    setup_pid_management(config.daemon)?;
 
     let adspower = if config.backend == "adspower" {
         Some(Arc::new(AdsPowerClient::new()))
@@ -103,6 +185,7 @@ pub async fn run(input_dir: Option<String>, config: MasterConfig) -> Result<()> 
     let (tx, mut rx) = mpsc::channel::<PathBuf>(100);
     let processing_files = Arc::new(std::sync::Mutex::new(HashSet::new()));
 
+    // Scan for existing files
     let entries = fs::read_dir(&input_path)?;
     for entry in entries {
         let entry = entry?;
@@ -118,76 +201,12 @@ pub async fn run(input_dir: Option<String>, config: MasterConfig) -> Result<()> 
         }
     }
 
-    let tx_clone = tx.clone();
-    let processing_files_clone = processing_files.clone();
-    let mut watcher = RecommendedWatcher::new(
-        move |res: notify::Result<notify::Event>| match res {
-            Ok(event) => {
-                if let EventKind::Create(_) = event.kind {
-                    info!("Received file event: {:?}", event.kind);
-                    for path in event.paths {
-                        if is_supported_file(&path) {
-                            let mut processing = processing_files_clone.lock().unwrap();
-                            if processing.insert(path.clone()) {
-                                info!("Detected new file: {:?}", path);
-                                let _ = tx_clone.try_send(path);
-                            }
-                        }
-                    }
-                }
-            }
-            Err(e) => error!("Watch error: {:?}", e),
-        },
-        Config::default(),
-    )?;
-
+    // Setup file watcher
+    let mut watcher = create_file_watcher(&input_path, tx.clone(), processing_files.clone())?;
     watcher.watch(&input_path, RecursiveMode::NonRecursive)?;
 
-    // 启动邮件监控（如果启用）
-    let email_monitor_instance = if config.enable_email_monitor {
-        info!("Email monitoring enabled");
-
-        let file_tracker = Arc::new(FileTracker::new());
-        let email_config = match EmailConfig::from_env() {
-            Ok(config) => config,
-            Err(e) => {
-                warn!(
-                    "Failed to create email config: {}, disabling email monitoring",
-                    e
-                );
-                return Ok(());
-            }
-        };
-
-        match EmailMonitor::new(email_config, file_tracker.clone()) {
-            Ok(monitor) => {
-                let monitor = Arc::new(monitor);
-                // 启动邮件监控任务
-                let monitor_clone = monitor.clone();
-                let monitor_handle = tokio::spawn(async move {
-                    info!("Email monitor task started");
-                    if let Err(e) = monitor_clone.start_monitoring().await {
-                        error!("Email monitor failed: {}", e);
-                    }
-                });
-
-                info!(
-                    "Email monitor task spawned (handle: {:?})",
-                    monitor_handle.id()
-                );
-                Some(monitor)
-            }
-            Err(e) => {
-                warn!(
-                    "Failed to create email monitor: {}, disabling email monitoring",
-                    e
-                );
-                None
-            }
-        }
-    } else {
-        None
-    };
+    // Initialize email monitor
+    let email_monitor_instance = initialize_email_monitor(&config).await;
 
     let (permit_tx, permit_rx) = async_channel::bounded(config.thread_count);
     for i in 0..config.thread_count {

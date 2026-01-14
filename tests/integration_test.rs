@@ -11,7 +11,7 @@ async fn test_end_to_end_workflow() {
     let test_dir = PathBuf::from("target/test_data");
     let input_dir = test_dir.join("input");
     let doned_dir = test_dir.join("doned");
-    
+
     // Clean up previous run
     if test_dir.exists() {
         fs::remove_dir_all(&test_dir).unwrap();
@@ -28,7 +28,7 @@ async fn test_end_to_end_workflow() {
     // We assume the binary is already built by `cargo test` or `cargo build`
     // Usually it is at target/debug/auto-scanner
     let exe_path = PathBuf::from("target/debug/auto-scanner");
-    
+
     if !exe_path.exists() {
         // Try to build it if not exists
         let status = std::process::Command::new("cargo")
@@ -40,7 +40,7 @@ async fn test_end_to_end_workflow() {
 
     // 4. Configure Master
     env::set_var("DONED_DIR", doned_dir.to_str().unwrap());
-    
+
     let config = MasterConfig {
         backend: "mock".to_string(),
         remote_url: "".to_string(),
@@ -56,13 +56,12 @@ async fn test_end_to_end_workflow() {
 
     // 5. Run Master in a separate task
     let input_dir_str = input_dir.to_str().unwrap().to_string();
-    let master_handle = tokio::spawn(async move {
-        master::run(Some(input_dir_str), config).await
-    });
+    let master_handle = tokio::spawn(async move { master::run(Some(input_dir_str), config).await });
 
     // 6. Wait for result
     let mut success = false;
-    for _ in 0..30 { // Wait up to 30 seconds
+    for _ in 0..30 {
+        // Wait up to 30 seconds
         let entries = fs::read_dir(&doned_dir).unwrap();
         for entry in entries {
             let entry = entry.unwrap();
@@ -73,7 +72,7 @@ async fn test_end_to_end_workflow() {
                     let content = fs::read_to_string(&path).unwrap();
                     println!("Found result file: {}", name);
                     println!("Content:\n{}", content);
-                    
+
                     if content.contains("登录成功") {
                         success = true;
                     }
@@ -89,6 +88,6 @@ async fn test_end_to_end_workflow() {
 
     // 7. Cleanup
     master_handle.abort();
-    
+
     assert!(success, "Failed to process file within timeout");
 }

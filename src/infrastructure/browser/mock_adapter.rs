@@ -2,6 +2,7 @@ use super::{BrowserAdapter, BrowserCookie, BrowserError};
 use async_trait::async_trait;
 use tracing::info;
 
+#[derive(Default)]
 pub struct MockBrowserAdapter;
 
 impl MockBrowserAdapter {
@@ -56,15 +57,21 @@ impl BrowserAdapter for MockBrowserAdapter {
         // Create a dummy file
         use tokio::fs::File;
         use tokio::io::AsyncWriteExt;
-        
+
         // Ensure directory exists
         if let Some(parent) = std::path::Path::new(path).parent() {
-            tokio::fs::create_dir_all(parent).await.map_err(|e| BrowserError::Other(e.to_string()))?;
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| BrowserError::Other(e.to_string()))?;
         }
 
-        let mut file = File::create(path).await.map_err(|e| BrowserError::Other(e.to_string()))?;
-        file.write_all(b"mock screenshot").await.map_err(|e| BrowserError::Other(e.to_string()))?;
-        
+        let mut file = File::create(path)
+            .await
+            .map_err(|e| BrowserError::Other(e.to_string()))?;
+        file.write_all(b"mock screenshot")
+            .await
+            .map_err(|e| BrowserError::Other(e.to_string()))?;
+
         Ok(())
     }
 }
