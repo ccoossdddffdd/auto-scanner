@@ -2,6 +2,8 @@ use super::{BrowserAdapter, BrowserCookie, BrowserError};
 use async_trait::async_trait;
 use playwright::api::{Browser, BrowserContext, Page};
 use playwright::Playwright;
+use tokio::time::{timeout, Duration};
+use tracing::info;
 
 pub struct PlaywrightAdapter {
     _playwright: Playwright,
@@ -12,17 +14,26 @@ pub struct PlaywrightAdapter {
 
 impl PlaywrightAdapter {
     pub async fn new(remote_url: &str) -> Result<Self, BrowserError> {
+        info!("Initializing Playwright...");
         let playwright = Playwright::initialize().await.map_err(|e| {
             BrowserError::ConnectionFailed(format!("Failed to initialize Playwright: {}", e))
         })?;
 
         let chromium = playwright.chromium();
 
-        let browser = chromium
-            .connect_over_cdp_builder(remote_url)
-            .connect_over_cdp()
-            .await
-            .map_err(|e| {
+        info!(
+            "Connecting to browser at {} with 10s timeout...",
+            remote_url
+        );
+        let browser = match timeout(
+            Duration::from_secs(10),
+            chromium
+                .connect_over_cdp_builder(remote_url)
+                .connect_over_cdp(),
+        )
+        .await
+        {
+            Ok(result) => result.map_err(|e| {
                 let msg = format!(
                     "Failed to connect over CDP: {}.\n\
                      Ensure Chrome is running with remote debugging enabled.\n\
@@ -38,16 +49,28 @@ impl PlaywrightAdapter {
                     e
                 );
                 BrowserError::ConnectionFailed(msg)
-            })?;
+            })?,
+            Err(_) => {
+                return Err(BrowserError::ConnectionFailed(format!(
+                    "Connection timed out after 10s connecting to {}",
+                    remote_url
+                )));
+            }
+        };
 
+        info!("Successfully connected to browser.");
+
+        info!("Getting browser contexts...");
         let contexts = browser
             .contexts()
             .map_err(|e| BrowserError::Other(format!("Failed to get contexts: {}", e)))?;
 
         let context = contexts.into_iter().next();
         let context = if let Some(ctx) = context {
+            info!("Using existing context.");
             ctx
         } else {
+            info!("Creating new context...");
             browser
                 .context_builder()
                 .build()
@@ -55,13 +78,16 @@ impl PlaywrightAdapter {
                 .map_err(|e| BrowserError::Other(format!("Failed to create context: {}", e)))?
         };
 
+        info!("Getting pages...");
         let pages = context
             .pages()
             .map_err(|e| BrowserError::Other(format!("Failed to get pages: {}", e)))?;
 
         let page = if let Some(p) = pages.into_iter().next() {
+            info!("Using existing page.");
             p
         } else {
+            info!("Creating new page...");
             context
                 .new_page()
                 .await
