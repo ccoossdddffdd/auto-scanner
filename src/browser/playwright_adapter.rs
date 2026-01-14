@@ -23,7 +23,21 @@ impl PlaywrightAdapter {
             .connect_over_cdp()
             .await
             .map_err(|e| {
-                BrowserError::ConnectionFailed(format!("Failed to connect over CDP: {}", e))
+                let msg = format!(
+                    "Failed to connect over CDP: {}.\n\
+                     Ensure Chrome is running with remote debugging enabled.\n\
+                     \n\
+                     Mac:\n\
+                     /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-debug\n\
+                     \n\
+                     Windows:\n\
+                     start chrome.exe --remote-debugging-port=9222 --user-data-dir=C:\\tmp\\chrome-debug\n\
+                     \n\
+                     Linux:\n\
+                     google-chrome --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-debug\n",
+                    e
+                );
+                BrowserError::ConnectionFailed(msg)
             })?;
 
         let contexts = browser
