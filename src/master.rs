@@ -17,10 +17,11 @@ pub async fn run(
     backend: String,
     remote_url: String,
     thread_count: usize,
+    enable_screenshot: bool,
 ) -> Result<()> {
     info!(
-        "Master started. Monitoring directory: {}, Threads: {}",
-        input_dir, thread_count
+        "Master started. Monitoring directory: {}, Threads: {}, Screenshots: {}",
+        input_dir, thread_count, enable_screenshot
     );
 
     let db = Arc::new(Database::new("auto-scanner.db").await?);
@@ -106,6 +107,7 @@ pub async fn run(
             &backend,
             &remote_url,
             semaphore.clone(),
+            enable_screenshot,
         )
         .await;
 
@@ -144,6 +146,7 @@ async fn process_file(
     backend: &str,
     remote_url: &str,
     semaphore: Arc<Semaphore>,
+    enable_screenshot: bool,
 ) -> Result<()> {
     let accounts = read_accounts_from_csv(path.to_str().unwrap()).await?;
     info!("Read {} accounts from {}", accounts.len(), batch_name);
@@ -163,8 +166,8 @@ async fn process_file(
         let handle = tokio::spawn(async move {
             info!("Spawning worker for {}", username);
 
-            let status = Command::new(exe_path)
-                .arg("worker")
+            let mut cmd = Command::new(exe_path);
+            cmd.arg("worker")
                 .arg("--username")
                 .arg(&username)
                 .arg("--password")
@@ -172,9 +175,13 @@ async fn process_file(
                 .arg("--remote-url")
                 .arg(&remote_url_str)
                 .arg("--backend")
-                .arg(&backend_str)
-                .status()
-                .await;
+                .arg(&backend_str);
+
+            if enable_screenshot {
+                cmd.arg("--enable-screenshot");
+            }
+
+            let status = cmd.status().await;
 
             match status {
                 Ok(s) if s.success() => {

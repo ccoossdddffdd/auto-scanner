@@ -27,6 +27,10 @@ pub enum Commands {
         /// Number of concurrent workers to spawn
         #[arg(long, default_value = "1")]
         thread_count: usize,
+
+        /// Enable screenshots after login
+        #[arg(long, default_value = "false")]
+        enable_screenshot: bool,
     },
     /// Run in worker mode to perform a single login (usually called by master)
     Worker {
@@ -45,6 +49,10 @@ pub enum Commands {
         /// Browser backend to use
         #[arg(long, default_value = "playwright")]
         backend: String,
+
+        /// Enable screenshots after login
+        #[arg(long, default_value = "false")]
+        enable_screenshot: bool,
     },
 }
 

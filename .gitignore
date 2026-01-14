@@ -1,3 +1,7 @@
 /target
+/incoming_csvs
+/screenshot
+
 auto-scanner.db
 test_accounts.csv
+.DS_Store
