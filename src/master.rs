@@ -319,6 +319,7 @@ async fn process_file(
 
         let adspower = adspower.clone();
         let permit_tx = permit_tx.clone();
+        let db = db.clone();
 
         let handle = tokio::spawn(async move {
             info!(
@@ -395,6 +396,21 @@ async fn process_file(
             match status {
                 Ok(s) if s.success() => {
                     info!("Worker for {} completed successfully", username);
+                    // Check DB for detailed result
+                    match db.get_account(&username).await {
+                        Ok(Some(account)) => {
+                            info!(
+                                "Worker result for {}: Success={:?}, Captcha={:?}, 2FA={:?}",
+                                username, account.success, account.captcha, account.two_fa
+                            );
+                        }
+                        Ok(None) => {
+                            warn!("Worker finished but account {} not found in DB", username);
+                        }
+                        Err(e) => {
+                            error!("Failed to fetch account status for {}: {}", username, e);
+                        }
+                    }
                 }
                 Ok(s) => {
                     error!("Worker for {} exited with error status: {}", username, s);

@@ -140,6 +140,24 @@ impl Database {
 
         Ok(accounts)
     }
+
+    pub async fn get_account(&self, username: &str) -> Result<Option<Account>> {
+        let row = sqlx::query(
+            "SELECT username, password, success, captcha, two_fa, batch FROM accounts WHERE username = ?1",
+        )
+        .bind(username)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|row| Account {
+            username: row.get("username"),
+            password: row.get("password"),
+            success: row.get("success"),
+            captcha: row.get("captcha"),
+            two_fa: row.get("two_fa"),
+            batch: row.get("batch"),
+        }))
+    }
 }
 
 #[cfg(test)]
