@@ -1,5 +1,6 @@
 use crate::adspower::AdsPowerClient;
 use crate::csv_reader::read_accounts_from_csv;
+use crate::excel_handler::{read_accounts_from_excel, write_results_to_excel};
 use crate::models::WorkerResult;
 use anyhow::{Context, Result};
 use chrono::Local;
@@ -96,7 +97,7 @@ pub async fn run(
     for entry in entries {
         let entry = entry?;
         let path = entry.path();
-        if is_csv_file(&path) {
+        if is_supported_file(&path) {
             let mut processing = processing_files.lock().unwrap();
             if processing.insert(path.clone()) {
                 tx.send(path).await?;
@@ -112,10 +113,10 @@ pub async fn run(
                 EventKind::Create(_) => {
                     info!("Received file event: {:?}", event.kind);
                     for path in event.paths {
-                        if is_csv_file(&path) {
+                        if is_supported_file(&path) {
                             let mut processing = processing_files_clone.lock().unwrap();
                             if processing.insert(path.clone()) {
-                                info!("Detected new CSV file: {:?}", path);
+                                info!("Detected new file: {:?}", path);
                                 let _ = tx_clone.try_send(path);
                             }
                         }
@@ -140,7 +141,7 @@ pub async fn run(
 
     let exe_path = env::current_exe().context("Failed to get current executable path")?;
 
-    info!("Waiting for new CSV files...");
+    info!("Waiting for new files...");
 
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
@@ -258,15 +259,27 @@ fn stop_master() -> Result<()> {
     Ok(())
 }
 
-fn is_csv_file(path: &Path) -> bool {
-    path.is_file()
-        && path.extension().map_or(false, |ext| ext == "csv")
-        && !path
-            .file_name()
-            .map_or(false, |n| n.to_string_lossy().contains(".done-"))
-        && !path
-            .file_name()
-            .map_or(false, |n| n.to_string_lossy().contains(".result.csv"))
+fn is_supported_file(path: &Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+
+    // Check for ignored files
+    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+        if name.contains(".done-") || name.contains(".result.") {
+            return false;
+        }
+        if name.starts_with("~$") {
+            // Ignore Excel temp files
+            return false;
+        }
+    }
+
+    // Check extension
+    path.extension().map_or(false, |ext| {
+        let ext = ext.to_string_lossy().to_lowercase();
+        ext == "csv" || ext == "xls" || ext == "xlsx"
+    })
 }
 
 async fn process_file(
@@ -280,8 +293,20 @@ async fn process_file(
     permit_tx: async_channel::Sender<usize>,
     enable_screenshot: bool,
 ) -> Result<()> {
+    let extension = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    let is_excel = extension == "xls" || extension == "xlsx";
+
     // Read accounts and original records/headers
-    let (accounts, records, headers) = read_accounts_from_csv(path.to_str().unwrap()).await?;
+    let (accounts, records, headers) = if is_excel {
+        read_accounts_from_excel(path)?
+    } else {
+        read_accounts_from_csv(path.to_str().unwrap()).await?
+    };
+
     info!("Read {} accounts from {}", accounts.len(), batch_name);
 
     let mut handles = Vec::new();
@@ -400,37 +425,66 @@ async fn process_file(
     results.sort_by_key(|k| k.0);
 
     // Overwrite the original file
-    let mut wtr = csv::Writer::from_path(path)?;
-
-    // Write Headers
-    let mut new_headers = headers.clone();
-    new_headers.push_field("状态");
-    new_headers.push_field("验证码");
-    new_headers.push_field("2FA");
-    new_headers.push_field("信息");
-    wtr.write_record(&new_headers)?;
-
-    for (idx, worker_res_opt) in results {
-        if let Some(record) = records.get(idx) {
-            let mut new_record = record.clone();
-
-            if let Some(res) = worker_res_opt {
-                new_record.push_field(&res.status);
-                new_record.push_field(&res.captcha);
-                new_record.push_field(&res.two_fa);
-                new_record.push_field(&res.message);
-            } else {
-                // Default failure if no result returned
-                new_record.push_field("系统错误");
-                new_record.push_field("未知");
-                new_record.push_field("未知");
-                new_record.push_field("Worker 执行失败");
+    if is_excel {
+        // Write Headers
+        let mut new_headers = headers.clone();
+        new_headers.push("状态".to_string());
+        new_headers.push("验证码".to_string());
+        new_headers.push("2FA".to_string());
+        new_headers.push("信息".to_string());
+        
+        let mut new_records = Vec::new();
+        for (idx, worker_res_opt) in results {
+            if let Some(record) = records.get(idx) {
+                let mut new_record = record.clone();
+                if let Some(res) = worker_res_opt {
+                    new_record.push(res.status);
+                    new_record.push(res.captcha);
+                    new_record.push(res.two_fa);
+                    new_record.push(res.message);
+                } else {
+                    new_record.push("系统错误".to_string());
+                    new_record.push("未知".to_string());
+                    new_record.push("未知".to_string());
+                    new_record.push("Worker 执行失败".to_string());
+                }
+                new_records.push(new_record);
             }
-            wtr.write_record(&new_record)?;
         }
+        write_results_to_excel(path, &new_headers, &new_records)?;
+    } else {
+        let mut wtr = csv::Writer::from_path(path)?;
+        
+        // Write Headers
+        let mut new_headers = headers.clone();
+        new_headers.push("状态".to_string());
+        new_headers.push("验证码".to_string());
+        new_headers.push("2FA".to_string());
+        new_headers.push("信息".to_string());
+        wtr.write_record(&new_headers)?;
+
+        for (idx, worker_res_opt) in results {
+            if let Some(record) = records.get(idx) {
+                let mut new_record = record.clone();
+                
+                if let Some(res) = worker_res_opt {
+                    new_record.push(res.status);
+                    new_record.push(res.captcha);
+                    new_record.push(res.two_fa);
+                    new_record.push(res.message);
+                } else {
+                    // Default failure if no result returned
+                    new_record.push("系统错误".to_string());
+                    new_record.push("未知".to_string());
+                    new_record.push("未知".to_string());
+                    new_record.push("Worker 执行失败".to_string());
+                }
+                wtr.write_record(&new_record)?;
+            }
+        }
+        wtr.flush()?;
     }
 
-    wtr.flush()?;
     info!("Results written back to {:?}", path);
 
     Ok(())

@@ -5,7 +5,7 @@ use tracing::{info, warn};
 
 pub async fn read_accounts_from_csv<P: AsRef<Path>>(
     path: P,
-) -> Result<(Vec<Account>, Vec<csv::StringRecord>, csv::StringRecord)> {
+) -> Result<(Vec<Account>, Vec<Vec<String>>, Vec<String>)> {
     let path = path.as_ref();
     info!("Reading accounts from CSV file: {}", path.display());
 
@@ -14,7 +14,8 @@ pub async fn read_accounts_from_csv<P: AsRef<Path>>(
         .context(format!("Failed to read CSV file: {}", path.display()))?;
 
     let mut reader = csv::Reader::from_reader(content.as_bytes());
-    let headers = reader.headers()?.clone();
+    let headers_record = reader.headers()?.clone();
+    let headers: Vec<String> = headers_record.iter().map(|s| s.to_string()).collect();
 
     let mut accounts = Vec::new();
     let mut records = Vec::new();
@@ -24,10 +25,10 @@ pub async fn read_accounts_from_csv<P: AsRef<Path>>(
             Ok(record) => {
                 // Try to deserialize into Account
                 // We provide headers so it can map by name
-                match record.deserialize(Some(&headers)) {
+                match record.deserialize(Some(&headers_record)) {
                     Ok(account) => {
                         accounts.push(account);
-                        records.push(record);
+                        records.push(record.iter().map(|s| s.to_string()).collect());
                     }
                     Err(e) => {
                         warn!(
@@ -68,8 +69,8 @@ mod tests {
         assert_eq!(accounts.len(), 2);
         assert_eq!(records.len(), 2);
         assert_eq!(headers.len(), 3);
-        
+
         assert_eq!(accounts[0].username, "user1@test.com");
-        assert_eq!(records[0].get(2), Some("val1"));
+        assert_eq!(records[0].get(2), Some(&"val1".to_string()));
     }
 }
