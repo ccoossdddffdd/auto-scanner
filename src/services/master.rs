@@ -313,6 +313,14 @@ pub async fn run(config: MasterConfig) -> Result<()> {
 
     // 确保在检查后端连接性之前加载环境变量
     dotenv::dotenv().ok();
+
+    // Debug: Check ADSPOWER_API_KEY
+    if let Ok(key) = std::env::var("ADSPOWER_API_KEY") {
+        info!("Loaded ADSPOWER_API_KEY from env: {}", key);
+    } else {
+        warn!("ADSPOWER_API_KEY not found in env after dotenv");
+    }
+
     ensure_backend_ready(&config).await?;
 
     // 初始化上下文
