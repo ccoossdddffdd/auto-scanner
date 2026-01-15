@@ -140,10 +140,7 @@ impl AdsPowerClient {
             .await?;
 
         let existing_names: HashSet<String> = if let Some(data) = data {
-            data.list
-                .into_iter()
-                .filter_map(|p| p.name)
-                .collect()
+            data.list.into_iter().filter_map(|p| p.name).collect()
         } else {
             HashSet::new()
         };
@@ -152,7 +149,8 @@ impl AdsPowerClient {
             let target_name = format!("auto-scanner-worker-{}", i);
             if !existing_names.contains(&target_name) {
                 info!("Creating missing profile: {}", target_name);
-                self.create_profile(&target_name).await?;
+                let user_id = self.create_profile(&target_name).await?;
+                info!("Created profile {} with ID: {}", target_name, user_id);
             } else {
                 info!("Profile exists: {}", target_name);
             }
