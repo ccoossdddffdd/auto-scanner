@@ -311,6 +311,8 @@ pub async fn run(config: MasterConfig) -> Result<()> {
         pid_manager.write_pid()?;
     }
 
+    // 确保在检查后端连接性之前加载环境变量
+    dotenv::dotenv().ok();
     ensure_backend_ready(&config).await?;
 
     // 初始化上下文
