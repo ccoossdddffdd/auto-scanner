@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::json;
+use std::collections::HashSet;
 use std::time::Duration;
 use tracing::{info, warn};
 
@@ -129,6 +130,34 @@ impl AdsPowerClient {
             .await
             .map(|_| ())
             .context("Failed to connect to AdsPower API")
+    }
+
+    pub async fn ensure_profiles_for_workers(&self, worker_count: usize) -> Result<()> {
+        info!("Checking AdsPower profiles for {} workers...", worker_count);
+
+        let data: Option<ProfileListResponse> = self
+            .call_api_with_query("/api/v1/user/list", &[("page_size", "2000")])
+            .await?;
+
+        let existing_names: HashSet<String> = if let Some(data) = data {
+            data.list
+                .into_iter()
+                .filter_map(|p| p.name)
+                .collect()
+        } else {
+            HashSet::new()
+        };
+
+        for i in 0..worker_count {
+            let target_name = format!("auto-scanner-worker-{}", i);
+            if !existing_names.contains(&target_name) {
+                info!("Creating missing profile: {}", target_name);
+                self.create_profile(&target_name).await?;
+            } else {
+                info!("Profile exists: {}", target_name);
+            }
+        }
+        Ok(())
     }
 
     pub async fn ensure_profile_for_thread(&self, thread_index: usize) -> Result<String> {

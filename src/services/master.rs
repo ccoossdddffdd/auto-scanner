@@ -240,11 +240,11 @@ async fn initialize_email_monitor(config: &MasterConfig) -> Option<Arc<EmailMoni
     }
 }
 
-async fn check_backend_connectivity(config: &MasterConfig) -> Result<()> {
-    info!("Checking backend connectivity for: {}", config.backend);
+async fn ensure_backend_ready(config: &MasterConfig) -> Result<()> {
+    info!("Ensuring backend is ready for: {}", config.backend);
 
     if config.backend == "mock" {
-        info!("Skipping connectivity check for mock backend");
+        info!("Skipping readiness check for mock backend");
         return Ok(());
     }
 
@@ -252,6 +252,12 @@ async fn check_backend_connectivity(config: &MasterConfig) -> Result<()> {
         let client = AdsPowerClient::new();
         client.check_connectivity().await?;
         info!("AdsPower API is reachable");
+
+        // 检查并创建足够的环境
+        client
+            .ensure_profiles_for_workers(config.thread_count)
+            .await
+            .context("Failed to ensure AdsPower profiles for workers")?;
     } else {
         let url_str = if config.remote_url.is_empty() {
             "http://127.0.0.1:9222"
@@ -305,7 +311,7 @@ pub async fn run(config: MasterConfig) -> Result<()> {
         pid_manager.write_pid()?;
     }
 
-    check_backend_connectivity(&config).await?;
+    ensure_backend_ready(&config).await?;
 
     // 初始化上下文
     let context = Arc::new(MasterContext::initialize(&config, input_dir).await?);
