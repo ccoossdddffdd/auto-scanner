@@ -142,8 +142,14 @@ impl WorkerCoordinator {
     /// 清理会话资源
     async fn cleanup_session(&self, session: Option<AdsPowerSession>, thread_index: usize) {
         if let (Some(client), Some(sess)) = (&self.adspower, session) {
+            // Stop the browser first
             if let Err(e) = client.stop_browser(&sess.profile_id).await {
                 error!("Failed to stop AdsPower browser: {}", e);
+            }
+            
+            // Delete the profile to ensure clean state for next run
+            if let Err(e) = client.delete_profile(&sess.profile_id).await {
+                error!("Failed to delete AdsPower profile {}: {}", sess.profile_id, e);
             }
         }
 

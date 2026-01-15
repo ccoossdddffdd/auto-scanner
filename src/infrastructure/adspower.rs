@@ -322,4 +322,17 @@ impl AdsPowerClient {
             }
         }
     }
+
+    pub async fn delete_profile(&self, user_id: &str) -> Result<()> {
+        let body = json!({
+            "user_ids": [user_id]
+        });
+
+        let _: serde_json::Value = self
+            .call_api("POST", "/api/v1/user/delete", Some(body))
+            .await?;
+
+        info!("Deleted AdsPower profile: {}", user_id);
+        Ok(())
+    }
 }
