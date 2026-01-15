@@ -463,7 +463,21 @@ impl LoginStrategy for FacebookLoginStrategy {
         // Wait for navigation or state change
         tokio::time::sleep(std::time::Duration::from_secs(8)).await;
 
-        // 检测登录结果
+        // 检查当前域名，判断是移动版还是桌面版
+        if let Ok(url) = adapter.get_current_url().await {
+            info!("After login, current URL: {}", url);
+
+            if url.contains("m.facebook.com") {
+                info!("Detected mobile version (m.facebook.com), using mobile detection logic");
+                return self
+                    .handle_mobile_login(adapter, account, enable_screenshot)
+                    .await;
+            } else {
+                info!("Detected desktop version, using desktop detection logic");
+            }
+        }
+
+        // 桌面版检测逻辑（原有逻辑）
         let status = LoginResultDetector::detect_status(adapter).await;
         let mut result = WorkerResult {
             status: "登录失败".to_string(),
@@ -615,5 +629,45 @@ impl FacebookLoginStrategy {
         info!("Screenshot saved to {}", filename);
 
         Ok(())
+    }
+
+    async fn handle_mobile_login(
+        &self,
+        adapter: &dyn BrowserAdapter,
+        account: &Account,
+        enable_screenshot: bool,
+    ) -> Result<WorkerResult> {
+        use crate::strategies::facebook_mobile::{
+            create_result, MobileFriendsCounter, MobileLoginDetector,
+        };
+
+        // 使用移动版检测逻辑
+        let status = MobileLoginDetector::detect_status(adapter).await;
+
+        // 如果登录成功，获取好友数量
+        let friends_count = match status {
+            crate::strategies::facebook_mobile::MobileLoginStatus::Success => {
+                match MobileFriendsCounter::get_count(adapter).await {
+                    Ok(count) => {
+                        info!("Mobile - Friends count: {}", count);
+                        Some(count)
+                    }
+                    Err(e) => {
+                        info!("Mobile - Failed to get friends count: {}", e);
+                        None
+                    }
+                }
+            }
+            _ => None,
+        };
+
+        // 生成结果
+        let result = create_result(status, friends_count);
+
+        if enable_screenshot {
+            self.take_screenshot(adapter, &account.username).await?;
+        }
+
+        Ok(result)
     }
 }
