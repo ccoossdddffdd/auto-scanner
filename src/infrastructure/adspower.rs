@@ -238,12 +238,21 @@ impl AdsPowerClient {
     }
 
     async fn create_profile(&self, username: &str) -> Result<String> {
-        let body = json!({
+        let mut body = json!({
             "name": username,
             "group_id": "0",
             "domain_name": "facebook.com",
             "open_urls": ["https://www.facebook.com"],
         });
+
+        // Add proxyid if configured in env
+        // This sets the 'proxyid' field in the request body, which corresponds to
+        // using a specific proxy configuration in AdsPower (e.g. luminati, oxylabs, etc. or a saved proxy ID)
+        if let Ok(proxyid) = env::var("ADSPOWER_PROXYID") {
+            if let Some(obj) = body.as_object_mut() {
+                obj.insert("proxyid".to_string(), json!(proxyid));
+            }
+        }
 
         let resp: CreateProfileResponse = self
             .call_api("POST", "/api/v1/user/create", Some(body))
