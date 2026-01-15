@@ -16,6 +16,7 @@ pub struct WorkerResult {
     pub captcha: String,
     pub two_fa: String,
     pub message: String,
+    pub friends_count: Option<u32>,
 }
 
 impl Account {

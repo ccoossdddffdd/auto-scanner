@@ -91,6 +91,7 @@ pub async fn write_results_and_rename(
     new_headers.push("状态".to_string());
     new_headers.push("验证码".to_string());
     new_headers.push("2FA".to_string());
+    new_headers.push("好友数量".to_string());
     new_headers.push("信息".to_string());
 
     let mut new_records = Vec::new();
@@ -101,9 +102,15 @@ pub async fn write_results_and_rename(
                 new_record.push(res.status);
                 new_record.push(res.captcha);
                 new_record.push(res.two_fa);
+                new_record.push(
+                    res.friends_count
+                        .map(|c| c.to_string())
+                        .unwrap_or_else(|| "未知".to_string()),
+                );
                 new_record.push(res.message);
             } else {
                 new_record.push("系统错误".to_string());
+                new_record.push("未知".to_string());
                 new_record.push("未知".to_string());
                 new_record.push("未知".to_string());
                 new_record.push("Worker 执行失败".to_string());

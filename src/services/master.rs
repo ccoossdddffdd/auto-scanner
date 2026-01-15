@@ -252,7 +252,7 @@ async fn ensure_backend_ready(config: &MasterConfig) -> Result<()> {
         let client = AdsPowerClient::new();
         client.check_connectivity().await?;
         info!("AdsPower API is reachable");
-        
+
         // 我们不再预先创建环境，而是由 Worker 按需创建并在使用后删除
         // client
         //     .ensure_profiles_for_workers(config.thread_count)

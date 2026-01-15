@@ -55,4 +55,13 @@ pub trait BrowserAdapter: Send + Sync {
 
     /// Take a screenshot and save it to the specified path
     async fn take_screenshot(&self, path: &str) -> Result<(), BrowserError>;
+
+    /// Get the current page URL
+    async fn get_current_url(&self) -> Result<String, BrowserError>;
+
+    /// Get text content of an element
+    async fn get_text(&self, selector: &str) -> Result<String, BrowserError>;
+
+    /// Get text content of all matching elements
+    async fn get_all_text(&self, selector: &str) -> Result<Vec<String>, BrowserError>;
 }

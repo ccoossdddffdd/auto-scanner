@@ -44,6 +44,7 @@ pub async fn run(
                 captcha: "未知".to_string(),
                 two_fa: "未知".to_string(),
                 message: format!("浏览器初始化失败: {}", e),
+                friends_count: None,
             };
             println!("RESULT_JSON:{}", serde_json::to_string(&result)?);
             return Err(e);
@@ -69,6 +70,7 @@ pub async fn run(
                 captcha: "未知".to_string(),
                 two_fa: "未知".to_string(),
                 message: format!("登录错误: {}", e),
+                friends_count: None,
             }
         }
     };

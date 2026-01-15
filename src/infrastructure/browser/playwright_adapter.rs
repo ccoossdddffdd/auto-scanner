@@ -151,19 +151,32 @@ impl BrowserAdapter for PlaywrightAdapter {
     }
 
     async fn is_visible(&self, selector: &str) -> Result<bool, BrowserError> {
-        // Manual visibility check using evaluate
-        let script = format!(
-            "document.querySelector('{}') && document.querySelector('{}').offsetParent !== null",
-            selector, selector
-        );
+        use tracing::debug;
 
-        let val: bool = self
-            .page
-            .evaluate(&script, ())
-            .await
-            .map_err(|e| BrowserError::Other(format!("Failed to check visibility: {}", e)))?;
+        // 首先尝试查询元素是否存在
+        let element = match self.page.query_selector(selector).await {
+            Ok(Some(el)) => el,
+            Ok(None) => {
+                debug!("Element not found: {}", selector);
+                return Ok(false);
+            }
+            Err(e) => {
+                debug!("Query selector error for '{}': {}", selector, e);
+                return Ok(false);
+            }
+        };
 
-        Ok(val)
+        // 检查元素是否可见
+        match element.is_visible().await {
+            Ok(visible) => {
+                debug!("Element '{}' visibility: {}", selector, visible);
+                Ok(visible)
+            }
+            Err(e) => {
+                debug!("Failed to check visibility for '{}': {}", selector, e);
+                Ok(false)
+            }
+        }
     }
 
     async fn get_cookies(&self) -> Result<Vec<BrowserCookie>, BrowserError> {
@@ -202,5 +215,45 @@ impl BrowserAdapter for PlaywrightAdapter {
             .await
             .map_err(|e| BrowserError::Other(format!("Failed to take screenshot: {}", e)))?;
         Ok(())
+    }
+
+    async fn get_current_url(&self) -> Result<String, BrowserError> {
+        self.page
+            .url()
+            .map_err(|e| BrowserError::Other(format!("Failed to get current URL: {}", e)))
+    }
+
+    async fn get_text(&self, selector: &str) -> Result<String, BrowserError> {
+        let element = self
+            .page
+            .query_selector(selector)
+            .await
+            .map_err(|e| BrowserError::ElementNotFound(format!("Query failed: {}", e)))?
+            .ok_or_else(|| BrowserError::ElementNotFound(selector.to_string()))?;
+
+        element
+            .text_content()
+            .await
+            .map_err(|e| BrowserError::Other(format!("Failed to get text content: {}", e)))?
+            .ok_or_else(|| BrowserError::Other("Element has no text content".to_string()))
+    }
+
+    async fn get_all_text(&self, selector: &str) -> Result<Vec<String>, BrowserError> {
+        let elements = self
+            .page
+            .query_selector_all(selector)
+            .await
+            .map_err(|e| BrowserError::ElementNotFound(format!("Query failed: {}", e)))?;
+
+        let mut texts = Vec::new();
+        for element in elements {
+            if let Ok(Some(text)) = element.text_content().await {
+                if !text.trim().is_empty() {
+                    texts.push(text);
+                }
+            }
+        }
+
+        Ok(texts)
     }
 }

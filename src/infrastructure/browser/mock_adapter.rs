@@ -35,10 +35,24 @@ impl BrowserAdapter for MockBrowserAdapter {
 
     async fn is_visible(&self, selector: &str) -> Result<bool, BrowserError> {
         info!("[Mock] Checking visibility of {}", selector);
-        // Simulate success scenario
-        if selector == "a[aria-label='Facebook']" {
+
+        // 模拟登录表单不存在（登录成功后不可见）
+        if selector == "input[name='email']" || selector == "input[name='pass']" {
+            return Ok(false);
+        }
+
+        // 模拟登录成功后的元素可见
+        if selector.contains("Your profile")
+            || selector.contains("Account")
+            || selector.contains("个人主页")
+            || selector == "div[role='main']"
+            || selector == "input[type='search']"
+            || selector.contains("Search")
+        {
             return Ok(true);
         }
+
+        // 其他元素默认不可见
         Ok(false)
     }
 
@@ -73,5 +87,20 @@ impl BrowserAdapter for MockBrowserAdapter {
             .map_err(|e| BrowserError::Other(e.to_string()))?;
 
         Ok(())
+    }
+
+    async fn get_current_url(&self) -> Result<String, BrowserError> {
+        info!("[Mock] Getting current URL");
+        Ok("https://www.facebook.com/".to_string())
+    }
+
+    async fn get_text(&self, selector: &str) -> Result<String, BrowserError> {
+        info!("[Mock] Getting text from {}", selector);
+        Ok("123 friends".to_string())
+    }
+
+    async fn get_all_text(&self, selector: &str) -> Result<Vec<String>, BrowserError> {
+        info!("[Mock] Getting all text from {}", selector);
+        Ok(vec!["5 friends".to_string(), "123 other text".to_string()])
     }
 }
