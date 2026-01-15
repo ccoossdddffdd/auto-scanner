@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use rand::Rng;
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::json;
@@ -238,11 +239,24 @@ impl AdsPowerClient {
     }
 
     async fn create_profile(&self, username: &str) -> Result<String> {
+        let system_type = if rand::rng().random_bool(0.5) {
+            "mac"
+        } else {
+            "windows"
+        };
+
+        // Use random_ua to specify the system type for fingerprint config
+        // "mac" corresponds to MacOS, "windows" corresponds to Windows
         let mut body = json!({
             "name": username,
             "group_id": "0",
             "domain_name": "facebook.com",
             "open_urls": ["https://www.facebook.com"],
+            "fingerprint_config": {
+                "random_ua": {
+                    "system": [system_type]
+                }
+            }
         });
 
         // ADSPOWER_PROXYID is mandatory
