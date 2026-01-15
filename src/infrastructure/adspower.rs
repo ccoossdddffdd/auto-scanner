@@ -13,7 +13,13 @@ fn get_api_url() -> String {
 }
 
 fn get_api_key() -> Option<String> {
-    env::var("ADSPOWER_API_KEY").ok().filter(|s| !s.is_empty())
+    let key = env::var("ADSPOWER_API_KEY").ok().filter(|s| !s.is_empty());
+    if key.is_some() {
+        info!("Using AdsPower API Key: ***");
+    } else {
+        warn!("No AdsPower API Key found in environment variables");
+    }
+    key
 }
 
 #[derive(Debug, Deserialize)]
