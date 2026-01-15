@@ -13,13 +13,11 @@ fn get_api_url() -> String {
 }
 
 fn get_api_key() -> Option<String> {
-    let key = env::var("ADSPOWER_API_KEY").ok().filter(|s| !s.is_empty());
-    if key.is_some() {
-        info!("Using AdsPower API Key: ***");
-    } else {
-        warn!("No AdsPower API Key found in environment variables");
-    }
-    key
+    // 优先读取 ADSPOWER_API_KEY，如果没有则尝试读取 ADSPOWER_TOKEN
+    env::var("ADSPOWER_API_KEY")
+        .or_else(|_| env::var("ADSPOWER_TOKEN"))
+        .ok()
+        .filter(|s| !s.is_empty())
 }
 
 #[derive(Debug, Deserialize)]
@@ -97,7 +95,10 @@ impl AdsPowerClient {
         // 如果未配置，则设置为空字符串或默认值，具体取决于 API 行为
         // 根据用户反馈，必须设置 api-key 头，即使可能为空
         if let Some(key) = get_api_key() {
-            request_builder = request_builder.header("api-key", key);
+            // 某些版本使用 api-key
+            request_builder = request_builder.header("api-key", &key);
+            // 某些版本使用 Authorization Bearer
+            request_builder = request_builder.header("Authorization", format!("Bearer {}", key));
         } else {
             // 如果环境变量未设置，但后端强制要求 api-key，尝试设置为空字符串
             // 或者检查是否之前读取逻辑有问题
@@ -142,7 +143,10 @@ impl AdsPowerClient {
         let mut request_builder = self.client.get(&url).query(query);
 
         if let Some(key) = get_api_key() {
-            request_builder = request_builder.header("api-key", key);
+            // 某些版本使用 api-key
+            request_builder = request_builder.header("api-key", &key);
+            // 某些版本使用 Authorization Bearer
+            request_builder = request_builder.header("Authorization", format!("Bearer {}", key));
         } else {
             warn!("ADSPOWER_API_KEY is not set, but sending request anyway.");
         }
