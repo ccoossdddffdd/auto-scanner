@@ -124,6 +124,13 @@ impl AdsPowerClient {
         Ok(resp.data)
     }
 
+    pub async fn check_connectivity(&self) -> Result<()> {
+        self.call_api_with_query::<serde_json::Value>("/api/v1/user/list", &[("page_size", "1")])
+            .await
+            .map(|_| ())
+            .context("Failed to connect to AdsPower API")
+    }
+
     pub async fn ensure_profile_for_thread(&self, thread_index: usize) -> Result<String> {
         let profile_name = format!("auto-scanner-worker-{}", thread_index);
 

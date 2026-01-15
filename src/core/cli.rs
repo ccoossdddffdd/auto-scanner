@@ -12,10 +12,6 @@ pub struct Cli {
 pub enum Commands {
     /// Run in master mode to manage workers and accounts
     Master {
-        /// Directory to monitor for CSV files
-        #[arg(short, long, value_name = "DIR", required_unless_present_any = ["stop", "status"])]
-        input: Option<String>,
-
         /// Browser backend to use
         #[arg(long, default_value = "playwright")]
         backend: String,
@@ -82,10 +78,10 @@ mod tests {
 
     #[test]
     fn test_cli_master_mode() {
-        let cli = Cli::try_parse_from(["auto-scanner", "master", "-i", "accounts.csv"]);
+        let cli = Cli::try_parse_from(["auto-scanner", "master"]);
         assert!(cli.is_ok());
-        if let Commands::Master { input, .. } = cli.unwrap().command {
-            assert_eq!(input, Some("accounts.csv".to_string()));
+        if let Commands::Master { .. } = cli.unwrap().command {
+            // Success
         } else {
             panic!("Expected Master command");
         }

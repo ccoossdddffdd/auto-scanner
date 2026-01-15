@@ -6,11 +6,8 @@
 /.cloudbase
 /.opencode
 
-auto-scanner.db
-auto-scanner.db*
-
-test_accounts.csv
 .DS_Store
+.env
 
 *.pid
 *.csv

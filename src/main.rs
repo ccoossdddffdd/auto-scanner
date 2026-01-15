@@ -12,7 +12,6 @@ fn main() -> Result<()> {
 
     match cli.command {
         Commands::Master {
-            input,
             backend,
             remote_url,
             thread_count,
@@ -41,7 +40,7 @@ fn main() -> Result<()> {
                 exe_path: None,
             };
             let rt = tokio::runtime::Runtime::new()?;
-            rt.block_on(async { master::run(input, config).await })?;
+            rt.block_on(async { master::run(config).await })?;
         }
         Commands::Worker {
             username,

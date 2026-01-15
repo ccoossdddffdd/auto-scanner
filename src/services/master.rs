@@ -9,11 +9,13 @@ use crate::services::processor::{
 use anyhow::{Context, Result};
 use async_channel;
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use reqwest::Url;
 use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
@@ -238,7 +240,45 @@ async fn initialize_email_monitor(config: &MasterConfig) -> Option<Arc<EmailMoni
     }
 }
 
-pub async fn run(input_dir: Option<String>, config: MasterConfig) -> Result<()> {
+async fn check_backend_connectivity(config: &MasterConfig) -> Result<()> {
+    info!("Checking backend connectivity for: {}", config.backend);
+
+    if config.backend == "mock" {
+        info!("Skipping connectivity check for mock backend");
+        return Ok(());
+    }
+
+    if config.backend == "adspower" {
+        let client = AdsPowerClient::new();
+        client.check_connectivity().await?;
+        info!("AdsPower API is reachable");
+    } else {
+        let url_str = if config.remote_url.is_empty() {
+            "http://127.0.0.1:9222"
+        } else {
+            &config.remote_url
+        };
+
+        let url =
+            Url::parse(url_str).context(format!("Failed to parse remote_url: {}", url_str))?;
+
+        let host = url.host_str().unwrap_or("127.0.0.1");
+        let port = url.port_or_known_default().unwrap_or(9222);
+
+        let addr = format!("{}:{}", host, port);
+        info!("Testing connection to {}", addr);
+
+        TcpStream::connect(&addr)
+            .await
+            .with_context(|| format!("Failed to connect to browser at {}", addr))?;
+
+        info!("Successfully connected to browser at {}", addr);
+    }
+
+    Ok(())
+}
+
+pub async fn run(config: MasterConfig) -> Result<()> {
     dotenv::dotenv().ok();
 
     let pid_manager = PidManager::new(PID_FILE);
@@ -253,7 +293,8 @@ pub async fn run(input_dir: Option<String>, config: MasterConfig) -> Result<()> 
 
     init_logging("auto-scanner", config.daemon)?;
 
-    let input_dir = input_dir.expect("Input directory is required unless --stop is specified");
+    let input_dir =
+        std::env::var("INPUT_DIR").context("INPUT_DIR environment variable must be set")?;
 
     info!(
         "Master started. Monitoring directory: {}, Threads: {}, Screenshots: {}, Backend: {}, Daemon: {}",
@@ -263,6 +304,8 @@ pub async fn run(input_dir: Option<String>, config: MasterConfig) -> Result<()> 
     if !config.daemon {
         pid_manager.write_pid()?;
     }
+
+    check_backend_connectivity(&config).await?;
 
     // 初始化上下文
     let context = Arc::new(MasterContext::initialize(&config, input_dir).await?);

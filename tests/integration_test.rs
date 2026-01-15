@@ -16,6 +16,9 @@ async fn test_end_to_end_workflow() {
     if test_dir.exists() {
         fs::remove_dir_all(&test_dir).unwrap();
     }
+    if std::path::Path::new("auto-scanner-master.pid").exists() {
+        fs::remove_file("auto-scanner-master.pid").unwrap();
+    }
     fs::create_dir_all(&input_dir).unwrap();
     fs::create_dir_all(&doned_dir).unwrap();
 
@@ -56,7 +59,12 @@ async fn test_end_to_end_workflow() {
 
     // 5. Run Master in a separate task
     let input_dir_str = input_dir.to_str().unwrap().to_string();
-    let master_handle = tokio::spawn(async move { master::run(Some(input_dir_str), config).await });
+    env::set_var("INPUT_DIR", &input_dir_str);
+    let master_handle = tokio::spawn(async move {
+        if let Err(e) = master::run(config).await {
+            eprintln!("Master process failed: {:?}", e);
+        }
+    });
 
     // 6. Wait for result
     let mut success = false;
