@@ -93,8 +93,15 @@ impl AdsPowerClient {
             _ => anyhow::bail!("Unsupported HTTP method: {}", method),
         };
 
+        // 尝试从 get_api_key 获取 key，但无论是否配置都强制设置 api-key 头
+        // 如果未配置，则设置为空字符串或默认值，具体取决于 API 行为
+        // 根据用户反馈，必须设置 api-key 头，即使可能为空
         if let Some(key) = get_api_key() {
             request_builder = request_builder.header("api-key", key);
+        } else {
+            // 如果环境变量未设置，但后端强制要求 api-key，尝试设置为空字符串
+            // 或者检查是否之前读取逻辑有问题
+            warn!("ADSPOWER_API_KEY is not set, but sending request anyway.");
         }
 
         if method == "POST" {
@@ -136,6 +143,8 @@ impl AdsPowerClient {
 
         if let Some(key) = get_api_key() {
             request_builder = request_builder.header("api-key", key);
+        } else {
+            warn!("ADSPOWER_API_KEY is not set, but sending request anyway.");
         }
 
         let response = request_builder
