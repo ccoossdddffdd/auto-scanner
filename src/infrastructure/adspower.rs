@@ -245,13 +245,23 @@ impl AdsPowerClient {
             "open_urls": ["https://www.facebook.com"],
         });
 
-        // Add proxyid if configured in env
-        // This sets the 'proxyid' field in the request body, which corresponds to
-        // using a specific proxy configuration in AdsPower (e.g. luminati, oxylabs, etc. or a saved proxy ID)
-        if let Ok(proxyid) = env::var("ADSPOWER_PROXYID") {
-            if let Some(obj) = body.as_object_mut() {
-                obj.insert("proxyid".to_string(), json!(proxyid));
-            }
+        // ADSPOWER_PROXYID is mandatory
+        let proxyid = env::var("ADSPOWER_PROXYID")
+            .context("ADSPOWER_PROXYID environment variable is required")?;
+
+        if let Some(obj) = body.as_object_mut() {
+            obj.insert(
+                "user_proxy_config".to_string(),
+                json!({
+                    "proxy_soft": "other",
+                    "proxy_type": "noproxy",
+                }),
+            );
+            // Although we set noproxy above as a fallback structure,
+            // if we are using a specific proxyid (saved proxy), we should check API docs.
+            // Usually 'proxyid' at top level is enough if it refers to a saved proxy.
+            // Let's stick to what we added but make it mandatory.
+            obj.insert("proxyid".to_string(), json!(proxyid));
         }
 
         let resp: CreateProfileResponse = self
