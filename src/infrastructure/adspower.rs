@@ -3,10 +3,14 @@ use reqwest::Client;
 use serde::Deserialize;
 use serde_json::json;
 use std::collections::HashSet;
+use std::env;
 use std::time::Duration;
+use tokio::time::sleep;
 use tracing::{info, warn};
 
-const ADSPOWER_API_URL: &str = "http://127.0.0.1:50325";
+fn get_api_url() -> String {
+    env::var("ADSPOWER_API_URL").unwrap_or_else(|_| "http://127.0.0.1:50325".to_string())
+}
 
 #[derive(Debug, Deserialize)]
 struct ApiResponse<T> {
@@ -68,7 +72,10 @@ impl AdsPowerClient {
         T: serde::Serialize,
         R: serde::de::DeserializeOwned,
     {
-        let url = format!("{}{}", ADSPOWER_API_URL, endpoint);
+        // Add 1s delay to avoid rate limiting
+        sleep(Duration::from_secs(1)).await;
+
+        let url = format!("{}{}", get_api_url(), endpoint);
 
         let request = match method {
             "GET" => self.client.get(&url),
@@ -106,7 +113,10 @@ impl AdsPowerClient {
     where
         R: serde::de::DeserializeOwned,
     {
-        let url = format!("{}{}", ADSPOWER_API_URL, endpoint);
+        // Add 1s delay to avoid rate limiting
+        sleep(Duration::from_secs(1)).await;
+
+        let url = format!("{}{}", get_api_url(), endpoint);
 
         let response = self
             .client
