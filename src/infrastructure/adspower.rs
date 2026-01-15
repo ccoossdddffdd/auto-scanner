@@ -238,11 +238,22 @@ impl AdsPowerClient {
     }
 
     async fn create_profile(&self, username: &str) -> Result<String> {
-        let body = json!({
+        // AdsPower may require a group_id. We'll try to get a default group ID first if needed.
+        // For now, let's try to query groups and pick the first one, or use a default if available.
+        // If creating without group_id fails, we need to provide one.
+
+        let mut body = json!({
             "name": username,
             "domain_name": "facebook.com",
             "open_urls": ["https://www.facebook.com"],
         });
+
+        // Try to get group_id from env, or list groups and pick one
+        if let Ok(group_id) = env::var("ADSPOWER_GROUP_ID") {
+            if let Some(obj) = body.as_object_mut() {
+                obj.insert("group_id".to_string(), json!(group_id));
+            }
+        }
 
         let resp: CreateProfileResponse = self
             .call_api("POST", "/api/v1/user/create", Some(body))
