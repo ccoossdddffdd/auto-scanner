@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use rand::Rng;
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::json;
@@ -167,10 +166,22 @@ impl AdsPowerClient {
     }
 
     pub async fn check_connectivity(&self) -> Result<()> {
-        self.call_api_with_query::<serde_json::Value>("/api/v1/user/list", &[("page_size", "1")])
+        // self.call_api_with_query::<serde_json::Value>("/api/v1/user/list", &[("page_size", "1")])
+        //     .await
+        //     .map(|_| ())
+        //     .context("Failed to connect to AdsPower API")
+        let result = self
+            .call_api_with_query::<serde_json::Value>("/api/v1/user/list", &[("page_size", "1")])
             .await
-            .map(|_| ())
-            .context("Failed to connect to AdsPower API")
+            .context("Failed to connect to AdsPower API")?;
+
+        if let Some(data) = result {
+            info!("AdsPower API Connectivity Check - Response: {:?}", data);
+        } else {
+            info!("AdsPower API Connectivity Check - Response is empty");
+        }
+
+        Ok(())
     }
 
     pub async fn ensure_profiles_for_workers(&self, worker_count: usize) -> Result<()> {
@@ -239,24 +250,11 @@ impl AdsPowerClient {
     }
 
     async fn create_profile(&self, username: &str) -> Result<String> {
-        let system_type = if rand::rng().random_bool(0.5) {
-            "mac"
-        } else {
-            "windows"
-        };
-
-        // Use random_ua to specify the system type for fingerprint config
-        // "mac" corresponds to MacOS, "windows" corresponds to Windows
         let mut body = json!({
             "name": username,
             "group_id": "0",
             "domain_name": "facebook.com",
             "open_urls": ["https://www.facebook.com"],
-            "fingerprint_config": {
-                "random_ua": {
-                    "system": [system_type]
-                }
-            }
         });
 
         // ADSPOWER_PROXYID is mandatory
