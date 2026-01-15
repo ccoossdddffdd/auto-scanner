@@ -12,6 +12,10 @@ fn get_api_url() -> String {
     env::var("ADSPOWER_API_URL").unwrap_or_else(|_| "http://127.0.0.1:50325".to_string())
 }
 
+fn get_api_key() -> Option<String> {
+    env::var("ADSPOWER_API_KEY").ok().filter(|s| !s.is_empty())
+}
+
 #[derive(Debug, Deserialize)]
 struct ApiResponse<T> {
     code: i32,
@@ -77,19 +81,23 @@ impl AdsPowerClient {
 
         let url = format!("{}{}", get_api_url(), endpoint);
 
-        let request = match method {
+        let mut request_builder = match method {
             "GET" => self.client.get(&url),
-            "POST" => {
-                let mut req = self.client.post(&url);
-                if let Some(data) = body {
-                    req = req.json(&data);
-                }
-                req
-            }
+            "POST" => self.client.post(&url),
             _ => anyhow::bail!("Unsupported HTTP method: {}", method),
         };
 
-        let response = request
+        if let Some(key) = get_api_key() {
+            request_builder = request_builder.header("api-key", key);
+        }
+
+        if method == "POST" {
+            if let Some(data) = body {
+                request_builder = request_builder.json(&data);
+            }
+        }
+
+        let response = request_builder
             .send()
             .await
             .context(format!("Failed to call AdsPower API: {}", endpoint))?;
@@ -118,10 +126,13 @@ impl AdsPowerClient {
 
         let url = format!("{}{}", get_api_url(), endpoint);
 
-        let response = self
-            .client
-            .get(&url)
-            .query(query)
+        let mut request_builder = self.client.get(&url).query(query);
+
+        if let Some(key) = get_api_key() {
+            request_builder = request_builder.header("api-key", key);
+        }
+
+        let response = request_builder
             .send()
             .await
             .context(format!("Failed to call AdsPower API: {}", endpoint))?;
