@@ -116,10 +116,121 @@ impl LoginResultDetector {
     }
 
     async fn check_captcha(adapter: &dyn BrowserAdapter) -> bool {
-        adapter
-            .is_visible("input[name='captcha_response']")
-            .await
-            .unwrap_or(false)
+        // 方法1: 检查 URL 是否包含验证码标识
+        if let Ok(url) = adapter.get_current_url().await {
+            if url.contains("captcha")
+                || url.contains("checkpoint") && url.contains("828281030927956")
+            {
+                // 828281030927956 是 Facebook 验证码 checkpoint 的特定 ID
+                info!("URL indicates captcha required");
+                return true;
+            }
+        }
+
+        // 方法2: 检查特定的验证码元素
+        let captcha_selectors = [
+            // 传统验证码输入框
+            "input[name='captcha_response']",
+            // reCAPTCHA iframe
+            "iframe[src*='recaptcha']",
+            "iframe[title*='reCAPTCHA']",
+            "iframe[title*='recaptcha']",
+            // hCaptcha
+            "iframe[src*='hcaptcha']",
+            "div[class*='hcaptcha']",
+            // Facebook 自己的验证码
+            "div[data-testid='captcha']",
+            "div[id*='captcha']",
+            // 验证码图片
+            "img[alt*='captcha']",
+            "img[src*='captcha']",
+        ];
+
+        for selector in &captcha_selectors {
+            if let Ok(visible) = adapter.is_visible(selector).await {
+                if visible {
+                    info!("Found captcha element: {}", selector);
+                    return true;
+                }
+            }
+        }
+
+        // 方法3: 检查错误消息中的验证码关键词
+        let error_selectors = [
+            "div[role='alert']",
+            "div._9ay7",
+            "#error_box",
+            "div[data-testid='error_message']",
+        ];
+
+        for selector in &error_selectors {
+            if let Ok(visible) = adapter.is_visible(selector).await {
+                if visible {
+                    if let Ok(text) = adapter.get_text(selector).await {
+                        let text_lower = text.to_lowercase();
+                        info!("Checking error message for captcha: {}", text);
+
+                        // 多语言验证码关键词
+                        let captcha_keywords = [
+                            // 英语
+                            "captcha",
+                            "verification",
+                            "verify",
+                            "security check",
+                            "confirm you're human",
+                            "prove you're human",
+                            // 中文
+                            "验证码",
+                            "安全检查",
+                            "验证",
+                            "人机验证",
+                            "证明你不是机器人",
+                            // 西班牙语
+                            "verificación",
+                            "comprobar",
+                            // 法语
+                            "vérification",
+                            "vérifier",
+                            // 德语
+                            "verifizierung",
+                            "überprüfung",
+                            // 葡萄牙语
+                            "verificação",
+                            "verificar",
+                            // 日语
+                            "認証",
+                            "確認",
+                            // 韩语
+                            "인증",
+                            "확인",
+                            // 越南语
+                            "xác minh",
+                            "xác nhận",
+                            // 印尼语
+                            "verifikasi",
+                            "memverifikasi",
+                            // 泰语
+                            "การยืนยัน",
+                            "ตรวจสอบ",
+                            // 阿拉伯语
+                            "التحقق",
+                            // 俄语
+                            "проверка",
+                            "капча",
+                        ];
+
+                        for keyword in &captcha_keywords {
+                            if text_lower.contains(keyword) {
+                                info!("Detected captcha via keyword: {}", keyword);
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        false
     }
 
     async fn check_2fa(adapter: &dyn BrowserAdapter) -> bool {
