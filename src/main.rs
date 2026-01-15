@@ -10,7 +10,7 @@ const PID_FILE: &str = "auto-scanner-master.pid";
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    match cli.command {
+    let result = match cli.command {
         Commands::Master {
             backend,
             remote_url,
@@ -40,7 +40,7 @@ fn main() -> Result<()> {
                 exe_path: None,
             };
             let rt = tokio::runtime::Runtime::new()?;
-            rt.block_on(async { master::run(config).await })?;
+            rt.block_on(async { master::run(config).await })
         }
         Commands::Worker {
             username,
@@ -55,7 +55,18 @@ fn main() -> Result<()> {
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(async {
                 worker::run(username, password, remote_url, backend, enable_screenshot).await
-            })?;
+            })
+        }
+    };
+
+    // 处理错误，提供友好的提示
+    if let Err(e) = result {
+        let error_msg = e.to_string();
+        if error_msg.contains("AdsPower") || error_msg.contains("adspower") {
+            eprintln!("\n❌ {}", error_msg);
+            std::process::exit(1);
+        } else {
+            return Err(e);
         }
     }
 

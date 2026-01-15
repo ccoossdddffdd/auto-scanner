@@ -47,10 +47,11 @@ impl LoginResultDetector {
             LoginStatus::Captcha
         } else if has_2fa {
             LoginStatus::TwoFactor
+        } else if wrong_password {
+            // 先检查密码错误，因为密码错误的关键词更具体
+            LoginStatus::WrongPassword
         } else if account_locked {
             LoginStatus::AccountLocked
-        } else if wrong_password {
-            LoginStatus::WrongPassword
         } else {
             LoginStatus::Failed
         }
@@ -268,7 +269,6 @@ impl LoginResultDetector {
             if let Ok(visible) = adapter.is_visible(selector).await {
                 if visible {
                     if let Ok(text) = adapter.get_text(selector).await {
-                        let text_lower = text.to_lowercase();
                         info!("Found error message for password check: {}", text);
 
                         // 多语言密码错误关键词
@@ -295,6 +295,8 @@ impl LoginResultDetector {
                             "incorreta",
                             // 日语
                             "パスワード",
+                            "ログイン情報",
+                            "誤り",
                             // 韩语
                             "비밀번호",
                             // 越南语
@@ -309,9 +311,22 @@ impl LoginResultDetector {
                             "كلمة المرور",
                         ];
 
+                        // 先检查原文本（支持大小写敏感的非拉丁字符）
                         for keyword in &password_keywords {
-                            if text_lower.contains(keyword) {
+                            if text.contains(keyword) {
                                 info!("Detected wrong password via keyword: {}", keyword);
+                                return true;
+                            }
+                        }
+
+                        // 再检查小写文本（支持拉丁字符的大小写不敏感匹配）
+                        let text_lower = text.to_lowercase();
+                        for keyword in &password_keywords {
+                            if text_lower.contains(&keyword.to_lowercase()) {
+                                info!(
+                                    "Detected wrong password via keyword (case-insensitive): {}",
+                                    keyword
+                                );
                                 return true;
                             }
                         }
@@ -449,6 +464,16 @@ impl LoginStrategy for FacebookLoginStrategy {
         info!("Waiting for email input...");
         adapter.wait_for_element("input[name='email']").await?;
 
+        // 检查当前域名，如果是移动版直接返回错误
+        if let Ok(url) = adapter.get_current_url().await {
+            info!("After navigation, current URL: {}", url);
+            if url.contains("m.facebook.com") {
+                anyhow::bail!(
+                    "Mobile version (m.facebook.com) is not supported. Please use desktop browser."
+                );
+            }
+        }
+
         info!("Typing credentials...");
         adapter
             .type_text("input[name='email']", &account.username)
@@ -463,17 +488,11 @@ impl LoginStrategy for FacebookLoginStrategy {
         // Wait for navigation or state change
         tokio::time::sleep(std::time::Duration::from_secs(8)).await;
 
-        // 检查当前域名，判断是移动版还是桌面版
+        // 再次检查是否跳转到移动版
         if let Ok(url) = adapter.get_current_url().await {
             info!("After login, current URL: {}", url);
-
             if url.contains("m.facebook.com") {
-                info!("Detected mobile version (m.facebook.com), using mobile detection logic");
-                return self
-                    .handle_mobile_login(adapter, account, enable_screenshot)
-                    .await;
-            } else {
-                info!("Detected desktop version, using desktop detection logic");
+                anyhow::bail!("Browser redirected to mobile version (m.facebook.com), which is not supported.");
             }
         }
 
@@ -629,45 +648,5 @@ impl FacebookLoginStrategy {
         info!("Screenshot saved to {}", filename);
 
         Ok(())
-    }
-
-    async fn handle_mobile_login(
-        &self,
-        adapter: &dyn BrowserAdapter,
-        account: &Account,
-        enable_screenshot: bool,
-    ) -> Result<WorkerResult> {
-        use crate::strategies::facebook_mobile::{
-            create_result, MobileFriendsCounter, MobileLoginDetector,
-        };
-
-        // 使用移动版检测逻辑
-        let status = MobileLoginDetector::detect_status(adapter).await;
-
-        // 如果登录成功，获取好友数量
-        let friends_count = match status {
-            crate::strategies::facebook_mobile::MobileLoginStatus::Success => {
-                match MobileFriendsCounter::get_count(adapter).await {
-                    Ok(count) => {
-                        info!("Mobile - Friends count: {}", count);
-                        Some(count)
-                    }
-                    Err(e) => {
-                        info!("Mobile - Failed to get friends count: {}", e);
-                        None
-                    }
-                }
-            }
-            _ => None,
-        };
-
-        // 生成结果
-        let result = create_result(status, friends_count);
-
-        if enable_screenshot {
-            self.take_screenshot(adapter, &account.username).await?;
-        }
-
-        Ok(result)
     }
 }

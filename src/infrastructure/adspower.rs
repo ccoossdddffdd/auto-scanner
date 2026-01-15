@@ -187,16 +187,46 @@ impl AdsPowerClient {
     }
 
     pub async fn check_connectivity(&self) -> Result<()> {
-        // self.call_api_with_query::<serde_json::Value>("/api/v1/user/list", &[("page_size", "1")])
-        //     .await
-        //     .map(|_| ())
-        //     .context("Failed to connect to AdsPower API")
-        let _ = self
-            .call_api_with_query::<serde_json::Value>("/api/v1/user/list", &[("page_size", "1")])
-            .await
-            .context("Failed to connect to AdsPower API")?;
+        // 使用 /api/v1/user/list 接口检查连接（更可靠）
+        // /status 接口可能返回空响应
+        info!("Checking AdsPower API connectivity...");
 
-        Ok(())
+        match self
+            .call_api_with_query::<ProfileListResponse>("/api/v1/user/list", &[("page_size", "1")])
+            .await
+        {
+            Ok(_) => {
+                info!("AdsPower API is ready");
+                Ok(())
+            }
+            Err(e) => {
+                let error_msg = format!("{:#}", e);
+
+                // 检查是否是连接错误
+                if error_msg.contains("connection")
+                    || error_msg.contains("Connection")
+                    || error_msg.contains("connect")
+                    || error_msg.contains("timeout")
+                    || error_msg.contains("refused")
+                {
+                    anyhow::bail!(
+                        "无法连接到 AdsPower API。\n\n\
+                        请确保：\n\
+                        1. AdsPower 客户端已启动\n\
+                        2. AdsPower 正在监听 http://127.0.0.1:50325\n\
+                        3. AdsPower 的 API 功能已启用\n\n\
+                        提示：请打开 AdsPower 客户端后重试。"
+                    );
+                }
+
+                // 其他错误（如 API 返回错误代码）
+                anyhow::bail!(
+                    "AdsPower API 返回错误：{}\n\n\
+                    请检查 AdsPower 客户端状态。",
+                    error_msg
+                );
+            }
+        }
     }
 
     pub async fn ensure_profiles_for_workers(&self, worker_count: usize) -> Result<()> {
@@ -265,11 +295,40 @@ impl AdsPowerClient {
     }
 
     async fn create_profile(&self, username: &str) -> Result<String> {
+        // 随机选择操作系统：Windows 或 Mac
+        // 使用时间戳的纳秒部分来决定（避免跨 await 的 Send 问题）
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .subsec_nanos();
+
+        // 根据文档：https://localapi-doc-zh.adspower.net/docs/BgoAbq
+        // ua_system_version 支持的值：
+        // - Windows: Windows 7, Windows 8, Windows 10, Windows 11
+        // - Mac: Mac OS X 10, Mac OS X 11, Mac OS X 12, Mac OS X 13
+        let ua_system_version = if nanos.is_multiple_of(2) {
+            "Windows" // Windows 操作系统（随机版本）
+        } else {
+            "Mac" // Mac 操作系统（随机版本）
+        };
+
+        info!(
+            "Creating profile {} with UA system: {}",
+            username, ua_system_version
+        );
+
         let mut body = json!({
             "name": username,
             "group_id": "0",
             "domain_name": "facebook.com",
             "open_urls": ["https://www.facebook.com"],
+            "fingerprint_config": {
+                "random_ua": {
+                    "ua_browser": ["chrome"],
+                    "ua_system_version": [ua_system_version]
+                }
+            }
         });
 
         // ADSPOWER_PROXYID is mandatory
@@ -298,20 +357,6 @@ impl AdsPowerClient {
         Ok(resp.id)
     }
 
-    pub async fn update_profile_for_account(&self, user_id: &str, username: &str) -> Result<()> {
-        let body = json!({
-            "user_id": user_id,
-            "name": format!("auto-scanner-{}", username),
-            "domain_name": "facebook.com",
-        });
-
-        let _: serde_json::Value = self
-            .call_api("POST", "/api/v1/user/update", Some(body))
-            .await?;
-
-        Ok(())
-    }
-
     pub async fn start_browser(&self, user_id: &str) -> Result<String> {
         let data: Option<StartBrowserResponse> = self
             .call_api_with_query(
@@ -333,17 +378,21 @@ impl AdsPowerClient {
     }
 
     pub async fn stop_browser(&self, user_id: &str) -> Result<()> {
-        let result: Result<serde_json::Value> = self
-            .call_api_with_query("/api/v1/browser/stop", &[("user_id", user_id)])
+        // 停止浏览器接口可能返回 data: null，这是正常的
+        match self
+            .call_api_with_query::<serde_json::Value>(
+                "/api/v1/browser/stop",
+                &[("user_id", user_id)],
+            )
             .await
-            .and_then(|data| data.context("No data in stop browser response"));
-
-        match result {
+        {
             Ok(_) => {
+                // 无论 data 是 Some 还是 None，只要 API 调用成功（code=0）就认为停止成功
                 info!("AdsPower browser stopped for {}", user_id);
                 Ok(())
             }
             Err(e) => {
+                // API 调用失败才记录警告，但仍然返回 Ok 避免影响流程
                 warn!("AdsPower stop browser error: {}", e);
                 Ok(())
             }

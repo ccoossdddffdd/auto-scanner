@@ -83,13 +83,10 @@ impl WorkerCoordinator {
             }
         };
 
-        if let Err(e) = client
-            .update_profile_for_account(&profile_id, username)
-            .await
-        {
-            error!("Failed to update AdsPower profile for {}: {}", username, e);
-            return None;
-        }
+        info!(
+            "Using AdsPower profile {} for account {} on thread {}",
+            profile_id, username, thread_index
+        );
 
         match client.start_browser(&profile_id).await {
             Ok(ws_url) => Some(AdsPowerSession { profile_id, ws_url }),

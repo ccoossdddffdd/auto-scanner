@@ -197,6 +197,8 @@ impl MobileLoginDetector {
                             "senha",
                             "incorreta",
                             "パスワード",
+                            "ログイン情報",
+                            "誤り",
                             "비밀번호",
                             "mật khẩu",
                             "sai",
