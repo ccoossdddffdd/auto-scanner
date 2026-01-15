@@ -170,16 +170,10 @@ impl AdsPowerClient {
         //     .await
         //     .map(|_| ())
         //     .context("Failed to connect to AdsPower API")
-        let result = self
+        let _ = self
             .call_api_with_query::<serde_json::Value>("/api/v1/user/list", &[("page_size", "1")])
             .await
             .context("Failed to connect to AdsPower API")?;
-
-        if let Some(data) = result {
-            info!("AdsPower API Connectivity Check - Response: {:?}", data);
-        } else {
-            info!("AdsPower API Connectivity Check - Response is empty");
-        }
 
         Ok(())
     }

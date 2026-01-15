@@ -6,6 +6,8 @@
 /.cloudbase
 /.opencode
 
+d-input
+
 .DS_Store
 .env
 

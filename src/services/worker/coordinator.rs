@@ -146,10 +146,13 @@ impl WorkerCoordinator {
             if let Err(e) = client.stop_browser(&sess.profile_id).await {
                 error!("Failed to stop AdsPower browser: {}", e);
             }
-            
+
             // Delete the profile to ensure clean state for next run
             if let Err(e) = client.delete_profile(&sess.profile_id).await {
-                error!("Failed to delete AdsPower profile {}: {}", sess.profile_id, e);
+                error!(
+                    "Failed to delete AdsPower profile {}: {}",
+                    sess.profile_id, e
+                );
             }
         }
 
