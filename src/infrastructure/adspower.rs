@@ -5,8 +5,12 @@ use serde_json::json;
 use std::collections::HashSet;
 use std::env;
 use std::time::Duration;
+use tokio::sync::Mutex;
 use tokio::time::sleep;
 use tracing::{info, warn};
+
+// 全局 API 调用锁，确保同一时间只有一个 AdsPower API 请求
+static API_LOCK: once_cell::sync::Lazy<Mutex<()>> = once_cell::sync::Lazy::new(|| Mutex::new(()));
 
 fn get_api_url() -> String {
     env::var("ADSPOWER_API_URL").unwrap_or_else(|_| "http://127.0.0.1:50325".to_string())
@@ -80,6 +84,11 @@ impl AdsPowerClient {
         T: serde::Serialize,
         R: serde::de::DeserializeOwned,
     {
+        // 获取全局 API 锁，确保同一时间只有一个请求
+        let _lock = API_LOCK.lock().await;
+
+        info!("AdsPower API call started: {} {}", method, endpoint);
+
         // Add 1s delay to avoid rate limiting
         sleep(Duration::from_secs(1)).await;
 
@@ -122,6 +131,8 @@ impl AdsPowerClient {
             anyhow::bail!("AdsPower API error ({}): {}", endpoint, resp.msg);
         }
 
+        info!("AdsPower API call completed: {} {}", method, endpoint);
+
         resp.data
             .context(format!("API {} returned success but no data", endpoint))
     }
@@ -135,6 +146,14 @@ impl AdsPowerClient {
     where
         R: serde::de::DeserializeOwned,
     {
+        // 获取全局 API 锁，确保同一时间只有一个请求
+        let _lock = API_LOCK.lock().await;
+
+        info!(
+            "AdsPower API query call started: GET {} {:?}",
+            endpoint, query
+        );
+
         // Add 1s delay to avoid rate limiting
         sleep(Duration::from_secs(1)).await;
 
@@ -161,6 +180,8 @@ impl AdsPowerClient {
         if resp.code != 0 {
             anyhow::bail!("AdsPower API error ({}): {}", endpoint, resp.msg);
         }
+
+        info!("AdsPower API query call completed: GET {}", endpoint);
 
         Ok(resp.data)
     }

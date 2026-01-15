@@ -219,6 +219,7 @@ dependencies = [
  "native-tls",
  "nix",
  "notify",
+ "once_cell",
  "playwright",
  "rand",
  "reqwest",
