@@ -66,33 +66,33 @@ async fn handle_email_notification(
 
         match result {
             Ok(final_path) => {
-                info!("Sending success notification to {}", from);
+                info!("发送成功通知给 {}", from);
                 if let Err(e) = monitor
                     .send_success_notification(&from, final_path.clone())
                     .await
                 {
-                    error!("Failed to send success notification: {}", e);
+                    error!("发送成功通知失败: {}", e);
                 }
                 if let Err(e) = monitor
                     .get_file_tracker()
                     .mark_success(id, final_path.clone())
                 {
-                    warn!("Failed to mark success in tracker: {}", e);
+                    warn!("在追踪器中标记成功失败: {}", e);
                 }
             }
             Err(e) => {
-                info!("Sending failure notification to {}", from);
+                info!("发送失败通知给 {}", from);
                 if let Err(e) = monitor
                     .send_failure_notification(&from, &e.to_string(), None)
                     .await
                 {
-                    error!("Failed to send failure notification: {}", e);
+                    error!("发送失败通知失败: {}", e);
                 }
                 if let Err(e) = monitor
                     .get_file_tracker()
                     .mark_failed(id, e.to_string(), None)
                 {
-                    warn!("Failed to mark failed in tracker: {}", e);
+                    warn!("在追踪器中标记失败失败: {}", e);
                 }
             }
         }
@@ -143,7 +143,7 @@ async fn process_accounts(
     let source = get_account_source(path);
     let (accounts, records, headers) = source.read(path).await?;
 
-    info!("Read {} accounts from {}", accounts.len(), batch_name);
+    info!("从 {} 读取了 {} 个账号", batch_name, accounts.len());
 
     let results = spawn_workers(&accounts, &config, permit_rx, permit_tx).await;
 

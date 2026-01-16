@@ -294,19 +294,25 @@ mod tests {
     #[test]
     fn test_mark_downloaded() {
         let tracker = FileTracker::new();
-        let file_path = PathBuf::from("/tmp/test.csv");
-        tracker.mark_downloaded("12345", file_path.clone()).unwrap();
+        let email_id = "12345";
+        let file_path = PathBuf::from("test.csv");
 
-        let status = tracker.get_status("12345");
+        // Register email first
+        tracker.register_email(email_id).unwrap();
+
+        tracker
+            .mark_downloaded(email_id, file_path.clone())
+            .unwrap();
+
+        let status = tracker.get_status(email_id);
         assert!(status.is_some());
-
         if let Some(ProcessingStatus::Downloaded {
             file_path: path, ..
         }) = status
         {
-            assert_eq!(path, PathBuf::from("/tmp/test.csv"));
+            assert_eq!(path, file_path);
         } else {
-            panic!("Expected Downloaded status");
+            panic!("Unexpected status");
         }
     }
 
@@ -341,21 +347,22 @@ mod tests {
     #[test]
     fn test_mark_success_and_failed() {
         let tracker = FileTracker::new();
+        let email_id1 = "12345";
+        let email_id2 = "67890";
+        let file_path = PathBuf::from("success.csv");
 
-        tracker
-            .mark_success("12345", PathBuf::from("/processed/test.csv"))
-            .unwrap();
-        let status = tracker.get_status("12345");
+        // Register emails first
+        tracker.register_email(email_id1).unwrap();
+        tracker.register_email(email_id2).unwrap();
+
+        tracker.mark_success(email_id1, file_path.clone()).unwrap();
+        let status = tracker.get_status(email_id1);
         assert!(matches!(status, Some(ProcessingStatus::Success { .. })));
 
         tracker
-            .mark_failed(
-                "67890",
-                "Test error".to_string(),
-                Some(PathBuf::from("/processed/test2.csv")),
-            )
+            .mark_failed(email_id2, "error".to_string(), None)
             .unwrap();
-        let status2 = tracker.get_status("67890");
-        assert!(matches!(status2, Some(ProcessingStatus::Failed { .. })));
+        let status = tracker.get_status(email_id2);
+        assert!(matches!(status, Some(ProcessingStatus::Failed { .. })));
     }
 }

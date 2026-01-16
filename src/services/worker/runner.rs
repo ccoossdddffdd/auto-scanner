@@ -13,32 +13,23 @@ pub async fn run(
     backend: String,
     strategy_name: String,
 ) -> Result<()> {
-    info!(
-        "Worker started for account: {}. Strategy: {}",
-        username, strategy_name
-    );
+    info!("Worker 已启动。账号: {}, 策略: {}", username, strategy_name);
 
     let account = Account::new(username.clone(), password);
 
     let adapter_result: Result<Box<dyn BrowserAdapter>> = match backend.as_str() {
         "playwright" | "cdp" | "adspower" => match PlaywrightAdapter::new(&remote_url).await {
             Ok(adapter) => Ok(Box::new(adapter)),
-            Err(e) => Err(anyhow::anyhow!(
-                "Failed to initialize Playwright adapter: {}",
-                e
-            )),
+            Err(e) => Err(anyhow::anyhow!("初始化 Playwright 适配器失败: {}", e)),
         },
         "mock" => Ok(Box::new(MockBrowserAdapter::new())),
-        _ => Err(anyhow::anyhow!(
-            "Unsupported backend in worker: {}",
-            backend
-        )),
+        _ => Err(anyhow::anyhow!("Worker 不支持的后端: {}", backend)),
     };
 
     let adapter = match adapter_result {
         Ok(a) => a,
         Err(e) => {
-            error!("Browser initialization failed for {}: {}", username, e);
+            error!("{} 浏览器初始化失败: {}", username, e);
             let result = WorkerResult {
                 status: "初始化失败".to_string(),
                 message: format!("浏览器初始化失败: {}", e),
@@ -52,7 +43,7 @@ pub async fn run(
     let strategy: Box<dyn BaseStrategy> = match strategy_name.as_str() {
         "facebook_login" => Box::new(FacebookLoginStrategy::new()),
         _ => {
-            return Err(anyhow::anyhow!("Unsupported strategy: {}", strategy_name));
+            return Err(anyhow::anyhow!("不支持的策略: {}", strategy_name));
         }
     };
 
@@ -75,6 +66,6 @@ pub async fn run(
     };
 
     println!("RESULT_JSON:{}", serde_json::to_string(&result)?);
-    info!("Worker completed for {}", username);
+    info!("{} Worker 执行完成", username);
     Ok(())
 }

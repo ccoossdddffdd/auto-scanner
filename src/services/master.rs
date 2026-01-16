@@ -57,16 +57,13 @@ impl MasterContext {
 
         let (permit_tx, permit_rx) = async_channel::bounded(config.thread_count);
         for i in 0..config.thread_count {
-            permit_tx
-                .send(i)
-                .await
-                .expect("Failed to initialize thread pool");
+            permit_tx.send(i).await.expect("初始化线程池失败");
         }
 
         let exe_path = if let Some(path) = config.exe_path.clone() {
             path
         } else {
-            env::current_exe().context("Failed to get current executable path")?
+            env::current_exe().context("获取当前可执行文件路径失败")?
         };
 
         Ok(Self {
@@ -111,7 +108,7 @@ impl FileProcessingHandler {
         // and we naturally fall through to the cleanup block.
         // This avoids TOCTOU race conditions and simplifies lock handling.
 
-        info!("Processing file: {:?}", csv_path);
+        info!("正在处理文件: {:?}", csv_path);
         let batch_name = csv_path
             .file_name()
             .and_then(|n| n.to_str())
@@ -138,10 +135,10 @@ impl FileProcessingHandler {
 
         match result {
             Ok(processed_path) => {
-                info!("Finished processing file: {:?}", processed_path);
+                info!("文件处理完成: {:?}", processed_path);
             }
             Err(e) => {
-                error!("Error processing file {:?}: {}", csv_path, e);
+                error!("处理文件 {:?} 时出错: {}", csv_path, e);
             }
         }
     }
@@ -190,7 +187,7 @@ fn create_file_watcher(
         move |res: notify::Result<notify::Event>| match res {
             Ok(event) => {
                 if let EventKind::Create(_) = event.kind {
-                    info!("Received file event: {:?}", event.kind);
+                    info!("收到文件事件: {:?}", event.kind);
                     for path in event.paths {
                         if is_supported_file(&path) {
                             let mut processing = match processing_files.lock() {
@@ -201,9 +198,9 @@ fn create_file_watcher(
                                 }
                             };
                             if processing.insert(path.clone()) {
-                                info!("Detected new file: {:?}", path);
+                                info!("检测到新文件: {:?}", path);
                                 if let Err(e) = tx.blocking_send(path) {
-                                    error!("Failed to send file path to processor: {}", e);
+                                    error!("发送文件路径到处理器失败: {}", e);
                                     // If we can't send, we should remove it from processing set
                                     // so it can be picked up again later
                                     // Note: we need to re-acquire the lock or handle this better,
@@ -214,7 +211,7 @@ fn create_file_watcher(
                     }
                 }
             }
-            Err(e) => error!("Watch error: {:?}", e),
+            Err(e) => error!("监控错误: {:?}", e),
         },
         Config::default(),
     )?;
@@ -227,16 +224,13 @@ async fn initialize_email_monitor(config: &MasterConfig) -> Option<Arc<EmailMoni
         return None;
     }
 
-    info!("Email monitoring enabled");
+    info!("邮件监控已启用");
 
     let file_tracker = Arc::new(FileTracker::new());
     let email_config = match EmailConfig::from_env() {
         Ok(config) => config,
         Err(e) => {
-            warn!(
-                "Failed to create email config: {}, disabling email monitoring",
-                e
-            );
+            warn!("创建邮件配置失败: {}, 禁用邮件监控", e);
             return None;
         }
     };
@@ -246,35 +240,32 @@ async fn initialize_email_monitor(config: &MasterConfig) -> Option<Arc<EmailMoni
             let monitor = Arc::new(monitor);
             let monitor_clone = monitor.clone();
             tokio::spawn(async move {
-                info!("Email monitor task started");
+                info!("邮件监控任务已启动");
                 if let Err(e) = monitor_clone.start_monitoring().await {
-                    error!("Email monitor failed: {}", e);
+                    error!("邮件监控失败: {}", e);
                 }
             });
             Some(monitor)
         }
         Err(e) => {
-            warn!(
-                "Failed to create email monitor: {}, disabling email monitoring",
-                e
-            );
+            warn!("创建邮件监控失败: {}, 禁用邮件监控", e);
             None
         }
     }
 }
 
 async fn ensure_backend_ready(config: &MasterConfig) -> Result<()> {
-    info!("Ensuring backend is ready for: {}", config.backend);
+    info!("正在确保后端就绪: {}", config.backend);
 
     if config.backend == "mock" {
-        info!("Skipping readiness check for mock backend");
+        info!("跳过 mock 后端的就绪检查");
         return Ok(());
     }
 
     if config.backend == "adspower" {
         let client = AdsPowerClient::new();
         client.check_connectivity().await?;
-        info!("AdsPower API is reachable");
+        info!("AdsPower API 可达");
     } else {
         let url_str = if config.remote_url.is_empty() {
             "http://127.0.0.1:9222"
@@ -282,20 +273,19 @@ async fn ensure_backend_ready(config: &MasterConfig) -> Result<()> {
             &config.remote_url
         };
 
-        let url =
-            Url::parse(url_str).context(format!("Failed to parse remote_url: {}", url_str))?;
+        let url = Url::parse(url_str).context(format!("解析 remote_url 失败: {}", url_str))?;
 
         let host = url.host_str().unwrap_or("127.0.0.1");
         let port = url.port_or_known_default().unwrap_or(9222);
 
         let addr = format!("{}:{}", host, port);
-        info!("Testing connection to {}", addr);
+        info!("测试连接到 {}", addr);
 
         TcpStream::connect(&addr)
             .await
-            .with_context(|| format!("Failed to connect to browser at {}", addr))?;
+            .with_context(|| format!("连接到浏览器 {} 失败", addr))?;
 
-        info!("Successfully connected to browser at {}", addr);
+        info!("成功连接到浏览器 {}", addr);
     }
 
     Ok(())
@@ -316,11 +306,10 @@ pub async fn run(config: MasterConfig) -> Result<()> {
 
     init_logging("auto-scanner", config.daemon)?;
 
-    let input_dir =
-        std::env::var("INPUT_DIR").context("INPUT_DIR environment variable must be set")?;
+    let input_dir = std::env::var("INPUT_DIR").context("必须设置 INPUT_DIR 环境变量")?;
 
     info!(
-        "Master started. Monitoring directory: {}, Threads: {}, Strategy: {}, Backend: {}, Daemon: {}",
+        "Master 已启动。监控目录: {}, 线程数: {}, 策略: {}, 后端: {}, 守护进程: {}",
         input_dir, config.thread_count, config.strategy, config.backend, config.daemon
     );
 
@@ -370,7 +359,7 @@ pub async fn run(config: MasterConfig) -> Result<()> {
     // 创建文件处理器
     let handler = FileProcessingHandler::new(config, context);
 
-    info!("Waiting for new files...");
+    info!("等待新文件...");
 
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
@@ -378,11 +367,11 @@ pub async fn run(config: MasterConfig) -> Result<()> {
     loop {
         tokio::select! {
             _ = sigterm.recv() => {
-                info!("Received SIGTERM, shutting down...");
+                info!("收到 SIGTERM，正在关闭...");
                 break;
             }
             _ = sigint.recv() => {
-                info!("Received SIGINT, shutting down...");
+                info!("收到 SIGINT，正在关闭...");
                 break;
             }
             Some(csv_path) = rx.recv() => {
@@ -392,7 +381,7 @@ pub async fn run(config: MasterConfig) -> Result<()> {
     }
 
     pid_manager.remove_pid_file();
-    info!("Master shutdown complete");
+    info!("Master 关闭完成");
 
     Ok(())
 }

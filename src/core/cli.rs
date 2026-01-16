@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
 #[command(name = "auto-scanner")]
-#[command(about = "Automated browser interaction and account verification tool", long_about = None)]
+#[command(about = "自动化浏览器交互与账号验证工具", long_about = None)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
@@ -10,63 +10,63 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum Commands {
-    /// Run in master mode to manage workers and accounts
+    /// 以 Master 模式运行，管理 Worker 和账号
     Master {
-        /// Browser backend to use
+        /// 使用的浏览器后端
         #[arg(long, default_value = "playwright")]
         backend: String,
 
-        /// Base remote debugging URL for browser
+        /// 浏览器的基础远程调试 URL
         #[arg(long, default_value = "http://localhost:9222")]
         remote_url: String,
 
-        /// Number of concurrent workers to spawn
+        /// 并发启动的 Worker 数量
         #[arg(long, default_value = "1")]
         thread_count: usize,
 
-        /// Login strategy to use
+        /// 使用的自动化策略
         #[arg(long, default_value = "facebook_login")]
         strategy: String,
 
-        /// Stop the running master process
+        /// 停止正在运行的 Master 进程
         #[arg(long, default_value = "false")]
         stop: bool,
 
-        /// Run as a background daemon
+        /// 作为后台守护进程运行
         #[arg(long, default_value = "false")]
         daemon: bool,
 
-        /// Check if the master process is running
+        /// 检查 Master 进程是否正在运行
         #[arg(long, default_value = "false")]
         status: bool,
 
-        /// Enable email monitoring
+        /// 启用邮件监控
         #[arg(long, default_value = "false")]
         enable_email_monitor: bool,
 
-        /// Email polling interval in seconds
+        /// 邮件轮询间隔（秒）
         #[arg(long, default_value = "60")]
         email_poll_interval: u64,
     },
-    /// Run in worker mode to perform a single login (usually called by master)
+    /// 以 Worker 模式运行，执行单个任务（通常由 Master 调用）
     Worker {
-        /// Account username
+        /// 账号用户名
         #[arg(long)]
         username: String,
 
-        /// Account password
+        /// 账号密码
         #[arg(long)]
         password: String,
 
-        /// Specific remote debugging URL for this worker
+        /// 该 Worker 的特定远程调试 URL
         #[arg(long)]
         remote_url: String,
 
-        /// Browser backend to use
+        /// 使用的浏览器后端
         #[arg(long, default_value = "playwright")]
         backend: String,
 
-        /// Login strategy to use
+        /// 使用的自动化策略
         #[arg(long, default_value = "facebook_login")]
         strategy: String,
     },

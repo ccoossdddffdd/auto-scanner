@@ -35,7 +35,7 @@ impl WorkerCoordinator {
         };
 
         info!(
-            "Spawning worker for {} on thread {}",
+            "正在线程 {} 上为 {} 启动 Worker",
             account.username, thread_index
         );
 
@@ -54,10 +54,7 @@ impl WorkerCoordinator {
                     url
                 }
                 None => {
-                    error!(
-                        "AdsPower session preparation failed for {}, aborting worker",
-                        account.username
-                    );
+                    error!("{} 的 AdsPower 会话准备失败，终止 Worker", account.username);
                     self.cleanup_session(None, thread_index).await;
                     return (index, None);
                 }
@@ -79,7 +76,7 @@ impl WorkerCoordinator {
         self.permit_rx
             .recv()
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to acquire thread: {}", e))
+            .map_err(|e| anyhow::anyhow!("获取线程槽位失败: {}", e))
     }
 
     /// 准备 AdsPower 会话
@@ -93,23 +90,20 @@ impl WorkerCoordinator {
         let profile_id = match client.ensure_profile_for_thread(thread_index).await {
             Ok(id) => id,
             Err(e) => {
-                error!(
-                    "Failed to ensure AdsPower profile for thread {}: {}",
-                    thread_index, e
-                );
+                error!("确保线程 {} 的 AdsPower 配置文件失败: {}", thread_index, e);
                 return None;
             }
         };
 
         info!(
-            "Using AdsPower profile {} for account {} on thread {}",
-            profile_id, username, thread_index
+            "线程 {}: 账号 {} 使用 AdsPower 配置文件 {}",
+            thread_index, username, profile_id
         );
 
         match client.start_browser(&profile_id).await {
             Ok(ws_url) => Some(AdsPowerSession { profile_id, ws_url }),
             Err(e) => {
-                error!("Failed to start AdsPower browser for {}: {}", username, e);
+                error!("启动 {} 的 AdsPower 浏览器失败: {}", username, e);
                 None
             }
         }
@@ -141,11 +135,8 @@ impl WorkerCoordinator {
 
         let output = match tokio::time::timeout(timeout_duration, cmd.output()).await {
             Ok(Ok(output)) => output,
-            Ok(Err(e)) => anyhow::bail!("Failed to run worker process: {}", e),
-            Err(_) => anyhow::bail!(
-                "Worker timed out after {} seconds",
-                timeout_duration.as_secs()
-            ),
+            Ok(Err(e)) => anyhow::bail!("运行 Worker 进程失败: {}", e),
+            Err(_) => anyhow::bail!("Worker 在 {} 秒后超时", timeout_duration.as_secs()),
         };
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -157,7 +148,7 @@ impl WorkerCoordinator {
             }
         }
 
-        anyhow::bail!("Worker for {} did not return valid JSON result", username)
+        anyhow::bail!("{} 的 Worker 未返回有效的 JSON 结果", username)
     }
 
     /// 清理会话资源
@@ -165,15 +156,12 @@ impl WorkerCoordinator {
         if let (Some(client), Some(sess)) = (&self.adspower, session) {
             // Stop the browser first
             if let Err(e) = client.stop_browser(&sess.profile_id).await {
-                error!("Failed to stop AdsPower browser: {}", e);
+                error!("停止 AdsPower 浏览器失败: {}", e);
             }
 
             // Delete the profile to ensure clean state for next run
             if let Err(e) = client.delete_profile(&sess.profile_id).await {
-                error!(
-                    "Failed to delete AdsPower profile {}: {}",
-                    sess.profile_id, e
-                );
+                error!("删除 AdsPower 配置文件 {} 失败: {}", sess.profile_id, e);
             }
         }
 

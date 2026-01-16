@@ -14,15 +14,15 @@ pub struct PlaywrightAdapter {
 
 impl PlaywrightAdapter {
     pub async fn new(remote_url: &str) -> Result<Self, BrowserError> {
-        info!("Initializing Playwright...");
+        info!("正在初始化 Playwright...");
         let playwright = Playwright::initialize().await.map_err(|e| {
-            BrowserError::ConnectionFailed(format!("Failed to initialize Playwright: {}", e))
+            BrowserError::ConnectionFailed(format!("初始化 Playwright 失败: {}", e))
         })?;
 
         let chromium = playwright.chromium();
 
         info!(
-            "Connecting to browser at {} with 10s timeout...",
+            "正在连接到浏览器 {} (10s 超时)...",
             remote_url
         );
         let browser = match timeout(
@@ -35,8 +35,8 @@ impl PlaywrightAdapter {
         {
             Ok(result) => result.map_err(|e| {
                 let msg = format!(
-                    "Failed to connect over CDP: {}.\n\
-                     Ensure Chrome is running with remote debugging enabled.\n\
+                    "通过 CDP 连接失败: {}.\n\
+                     请确保 Chrome 已启用远程调试运行。\n\
                      \n\
                      Mac:\n\
                      /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-debug\n\
@@ -52,46 +52,46 @@ impl PlaywrightAdapter {
             })?,
             Err(_) => {
                 return Err(BrowserError::ConnectionFailed(format!(
-                    "Connection timed out after 10s connecting to {}",
+                    "连接到 {} 超时 (10s)",
                     remote_url
                 )));
             }
         };
 
-        info!("Successfully connected to browser.");
+        info!("成功连接到浏览器。");
 
-        info!("Getting browser contexts...");
+        info!("正在获取浏览器上下文...");
         let contexts = browser
             .contexts()
-            .map_err(|e| BrowserError::Other(format!("Failed to get contexts: {}", e)))?;
+            .map_err(|e| BrowserError::Other(format!("获取上下文失败: {}", e)))?;
 
         let context = contexts.into_iter().next();
         let context = if let Some(ctx) = context {
-            info!("Using existing context.");
+            info!("使用现有上下文。");
             ctx
         } else {
-            info!("Creating new context...");
+            info!("正在创建新上下文...");
             browser
                 .context_builder()
                 .build()
                 .await
-                .map_err(|e| BrowserError::Other(format!("Failed to create context: {}", e)))?
+                .map_err(|e| BrowserError::Other(format!("创建上下文失败: {}", e)))?
         };
 
-        info!("Getting pages...");
+        info!("正在获取页面...");
         let pages = context
             .pages()
-            .map_err(|e| BrowserError::Other(format!("Failed to get pages: {}", e)))?;
+            .map_err(|e| BrowserError::Other(format!("获取页面失败: {}", e)))?;
 
         let page = if let Some(p) = pages.into_iter().next() {
-            info!("Using existing page.");
+            info!("使用现有页面。");
             p
         } else {
-            info!("Creating new page...");
+            info!("正在创建新页面...");
             context
                 .new_page()
                 .await
-                .map_err(|e| BrowserError::Other(format!("Failed to create new page: {}", e)))?
+                .map_err(|e| BrowserError::Other(format!("创建新页面失败: {}", e)))?
         };
 
         Ok(Self {
@@ -120,7 +120,7 @@ impl BrowserAdapter for PlaywrightAdapter {
             .fill()
             .await
             .map_err(|e| {
-                BrowserError::ElementNotFound(format!("Failed to fill element {}: {}", selector, e))
+                BrowserError::ElementNotFound(format!("填充元素 {} 失败: {}", selector, e))
             })?;
         Ok(())
     }
@@ -132,7 +132,7 @@ impl BrowserAdapter for PlaywrightAdapter {
             .await
             .map_err(|e| {
                 BrowserError::ElementNotFound(format!(
-                    "Failed to click element {}: {}",
+                    "点击元素 {} 失败: {}",
                     selector, e
                 ))
             })?;
@@ -145,7 +145,7 @@ impl BrowserAdapter for PlaywrightAdapter {
             .wait_for_selector()
             .await
             .map_err(|e| {
-                BrowserError::Timeout(format!("Timeout waiting for {}: {}", selector, e))
+                BrowserError::Timeout(format!("等待 {} 超时: {}", selector, e))
             })?;
         Ok(())
     }
@@ -157,11 +157,11 @@ impl BrowserAdapter for PlaywrightAdapter {
         let element = match self.page.query_selector(selector).await {
             Ok(Some(el)) => el,
             Ok(None) => {
-                debug!("Element not found: {}", selector);
+                debug!("未找到元素: {}", selector);
                 return Ok(false);
             }
             Err(e) => {
-                debug!("Query selector error for '{}': {}", selector, e);
+                debug!("查询选择器 '{}' 错误: {}", selector, e);
                 return Ok(false);
             }
         };
@@ -169,11 +169,11 @@ impl BrowserAdapter for PlaywrightAdapter {
         // 检查元素是否可见
         match element.is_visible().await {
             Ok(visible) => {
-                debug!("Element '{}' visibility: {}", selector, visible);
+                debug!("元素 '{}' 可见性: {}", selector, visible);
                 Ok(visible)
             }
             Err(e) => {
-                debug!("Failed to check visibility for '{}': {}", selector, e);
+                debug!("检查 '{}' 可见性失败: {}", selector, e);
                 Ok(false)
             }
         }
@@ -184,7 +184,7 @@ impl BrowserAdapter for PlaywrightAdapter {
             ._context
             .cookies(&[])
             .await
-            .map_err(|e| BrowserError::Other(format!("Failed to get cookies: {}", e)))?;
+            .map_err(|e| BrowserError::Other(format!("获取 Cookies 失败: {}", e)))?;
 
         Ok(cookies
             .into_iter()
@@ -203,7 +203,7 @@ impl BrowserAdapter for PlaywrightAdapter {
 
     async fn set_cookies(&self, _cookies: &[BrowserCookie]) -> Result<(), BrowserError> {
         Err(BrowserError::Other(
-            "set_cookies not fully implemented".to_string(),
+            "set_cookies 尚未完全实现".to_string(),
         ))
     }
 
@@ -213,14 +213,14 @@ impl BrowserAdapter for PlaywrightAdapter {
             .path(std::path::PathBuf::from(path))
             .screenshot()
             .await
-            .map_err(|e| BrowserError::Other(format!("Failed to take screenshot: {}", e)))?;
+            .map_err(|e| BrowserError::Other(format!("截图失败: {}", e)))?;
         Ok(())
     }
 
     async fn get_current_url(&self) -> Result<String, BrowserError> {
         self.page
             .url()
-            .map_err(|e| BrowserError::Other(format!("Failed to get current URL: {}", e)))
+            .map_err(|e| BrowserError::Other(format!("获取当前 URL 失败: {}", e)))
     }
 
     async fn get_text(&self, selector: &str) -> Result<String, BrowserError> {
@@ -228,14 +228,14 @@ impl BrowserAdapter for PlaywrightAdapter {
             .page
             .query_selector(selector)
             .await
-            .map_err(|e| BrowserError::ElementNotFound(format!("Query failed: {}", e)))?
+            .map_err(|e| BrowserError::ElementNotFound(format!("查询失败: {}", e)))?
             .ok_or_else(|| BrowserError::ElementNotFound(selector.to_string()))?;
 
         element
             .text_content()
             .await
-            .map_err(|e| BrowserError::Other(format!("Failed to get text content: {}", e)))?
-            .ok_or_else(|| BrowserError::Other("Element has no text content".to_string()))
+            .map_err(|e| BrowserError::Other(format!("获取文本内容失败: {}", e)))?
+            .ok_or_else(|| BrowserError::Other("元素没有文本内容".to_string()))
     }
 
     async fn get_all_text(&self, selector: &str) -> Result<Vec<String>, BrowserError> {
@@ -243,7 +243,7 @@ impl BrowserAdapter for PlaywrightAdapter {
             .page
             .query_selector_all(selector)
             .await
-            .map_err(|e| BrowserError::ElementNotFound(format!("Query failed: {}", e)))?;
+            .map_err(|e| BrowserError::ElementNotFound(format!("查询失败: {}", e)))?;
 
         let mut texts = Vec::new();
         for element in elements {

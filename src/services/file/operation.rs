@@ -9,7 +9,7 @@ use std::sync::Arc;
 use tracing::{info, warn};
 
 pub async fn convert_txt_to_csv(path: &Path) -> Result<PathBuf> {
-    info!("Converting TXT to CSV: {:?}", path);
+    info!("正在将 TXT 转换为 CSV: {:?}", path);
     let content = tokio::fs::read_to_string(path).await?;
     let mut csv_content = String::from("username,password\n");
 
@@ -34,18 +34,18 @@ pub fn rename_processed_file(path: &Path, doned_dir: &Path) -> Result<PathBuf> {
     let file_name = path
         .file_stem()
         .and_then(|s| s.to_str())
-        .context("Invalid filename")?;
+        .context("无效的文件名")?;
 
     // We use the provided doned_dir instead of assuming it's in the parent directory
     if !doned_dir.exists() {
-        fs::create_dir_all(doned_dir).context("Failed to create doned directory")?;
+        fs::create_dir_all(doned_dir).context("创建完成目录失败")?;
     }
 
     let new_name = format!("{}.done-{}.csv", file_name, now);
     let new_path = doned_dir.join(new_name);
 
-    fs::rename(path, &new_path).context("Failed to move processed file to doned directory")?;
-    info!("Moved processed file to {:?}", new_path);
+    fs::rename(path, &new_path).context("移动处理后的文件到完成目录失败")?;
+    info!("已将处理后的文件移动到 {:?}", new_path);
     Ok(new_path)
 }
 
@@ -67,12 +67,12 @@ pub async fn prepare_input_file(
 
     if let Some(monitor) = email_monitor {
         if let Err(e) = monitor.get_file_tracker().update_file_path(path, &new_path) {
-            warn!("Failed to update file tracker path: {}", e);
+            warn!("更新文件追踪器路径失败: {}", e);
         }
     }
 
-    fs::remove_file(path).context("Failed to remove original TXT file")?;
-    info!("Converted {:?} to CSV and removed original", path);
+    fs::remove_file(path).context("删除原始 TXT 文件失败")?;
+    info!("已将 {:?} 转换为 CSV 并删除原文件", path);
 
     Ok(new_path)
 }
@@ -115,17 +115,19 @@ pub async fn write_results_and_rename(
             if let Some(res) = worker_res_opt {
                 new_record.push(res.status.clone());
                 new_record.push(res.message.clone());
-                
+
                 // Add values for dynamic keys
                 for key in &dynamic_keys {
                     let value = if let Some(data) = &res.data {
-                        data.get(key).map(|v| match v {
-                            serde_json::Value::String(s) => s.clone(),
-                            serde_json::Value::Number(n) => n.to_string(),
-                            serde_json::Value::Bool(b) => b.to_string(),
-                            serde_json::Value::Null => "无".to_string(),
-                            _ => v.to_string(),
-                        }).unwrap_or_else(|| "未知".to_string())
+                        data.get(key)
+                            .map(|v| match v {
+                                serde_json::Value::String(s) => s.clone(),
+                                serde_json::Value::Number(n) => n.to_string(),
+                                serde_json::Value::Bool(b) => b.to_string(),
+                                serde_json::Value::Null => "无".to_string(),
+                                _ => v.to_string(),
+                            })
+                            .unwrap_or_else(|| "未知".to_string())
                     } else {
                         "未知".to_string()
                     };
@@ -144,12 +146,12 @@ pub async fn write_results_and_rename(
     }
 
     source.write(path, &new_headers, &new_records).await?;
-    info!("Results written back to {:?}", path);
+    info!("结果已写回 {:?}", path);
 
     if extension == "xls" {
         let new_xlsx_path = path.with_extension("xlsx");
-        fs::rename(path, &new_xlsx_path).context("Failed to rename .xls to .xlsx")?;
-        info!("Renamed processed .xls to .xlsx: {:?}", new_xlsx_path);
+        fs::rename(path, &new_xlsx_path).context("重命名 .xls 到 .xlsx 失败")?;
+        info!("已将处理后的 .xls 重命名为 .xlsx: {:?}", new_xlsx_path);
         rename_processed_file(&new_xlsx_path, doned_dir)
     } else {
         rename_processed_file(path, doned_dir)

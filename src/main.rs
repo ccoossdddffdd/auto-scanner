@@ -26,7 +26,7 @@ fn main() -> Result<()> {
                 start_daemon(PID_FILE, "logs/auto-scanner.out", "logs/auto-scanner.err")?;
             }
 
-            // Create runtime and run master
+            // 创建运行时并运行主进程
             let config = master::MasterConfig {
                 backend,
                 remote_url,
@@ -49,7 +49,7 @@ fn main() -> Result<()> {
             backend,
             strategy,
         } => {
-            // Initialize logging for Worker
+            // 初始化 Worker 日志
             init_logging("auto-scanner-worker", false)?;
 
             let rt = tokio::runtime::Runtime::new()?;
