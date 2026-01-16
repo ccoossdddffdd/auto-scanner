@@ -40,7 +40,7 @@ pub async fn run(
         Err(e) => {
             error!("Browser initialization failed for {}: {}", username, e);
             let result = WorkerResult {
-                status: "登录失败".to_string(),
+                status: "初始化失败".to_string(),
                 message: format!("浏览器初始化失败: {}", e),
                 data: None,
             };
@@ -59,16 +59,16 @@ pub async fn run(
     let result = match strategy.run(adapter.as_ref(), &account).await {
         Ok(outcome) => {
             info!(
-                "Login process finished for {}. Success: {}",
+                "Strategy execution finished for {}. Success: {}",
                 username, outcome.status
             );
             outcome
         }
         Err(e) => {
-            error!("Login failed for {}: {}", username, e);
+            error!("Strategy execution failed for {}: {}", username, e);
             WorkerResult {
-                status: "登录失败".to_string(),
-                message: format!("登录错误: {}", e),
+                status: "执行失败".to_string(),
+                message: format!("执行错误: {}", e),
                 data: None,
             }
         }

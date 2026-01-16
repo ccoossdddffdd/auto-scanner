@@ -295,11 +295,16 @@ impl AdsPowerClient {
             username, ua_system_version
         );
 
+        // TODO: These values are currently hardcoded for Facebook.
+        // In the future, we should make them configurable based on the selected strategy.
+        let domain_name = "facebook.com";
+        let open_urls = ["https://www.facebook.com"];
+
         let mut body = json!({
             "name": username,
             "group_id": "0",
-            "domain_name": "facebook.com",
-            "open_urls": ["https://www.facebook.com"],
+            "domain_name": domain_name,
+            "open_urls": open_urls,
             "fingerprint_config": {
                 "random_ua": {
                     "ua_browser": ["chrome"],

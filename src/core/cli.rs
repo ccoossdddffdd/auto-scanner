@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
 #[command(name = "auto-scanner")]
-#[command(about = "Automated Facebook account verification tool", long_about = None)]
+#[command(about = "Automated browser interaction and account verification tool", long_about = None)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,

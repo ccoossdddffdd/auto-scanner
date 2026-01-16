@@ -62,6 +62,9 @@ Auto Scanner 是一个高性能、异步的 Rust 应用程序，专为自动化�
 - **配置管理**:
     - 使用 `src/strategies/facebook/constants.rs` 管理策略相关的常量（选择器、关键词）。
     - 使用 `.env` 和 `clap`（CLI 参数）进行系统配置。
+- **Strategy Pattern**: Implement the `BaseStrategy` trait for different automation logic (e.g., `FacebookLoginStrategy`, `TwitterFollowStrategy`).
+- **Worker Isolation**: Each worker runs in its own process, managed by the Master.
+- **Dynamic Configuration**: Strategies can be selected at runtime via CLI arguments.
 
 ### 4.2. 添加新策略
 
