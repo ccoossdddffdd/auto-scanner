@@ -9,8 +9,6 @@ use crate::services::processor::{
     process_file, BrowserConfig, FileConfig, ProcessConfig, WorkerConfig,
 };
 use anyhow::{Context, Result};
-use async_channel;
-use notify::Watcher;
 use reqwest::Url;
 use std::env;
 use std::fs;

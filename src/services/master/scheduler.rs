@@ -7,6 +7,12 @@ pub struct JobScheduler {
     processing_files: Arc<Mutex<HashSet<PathBuf>>>,
 }
 
+impl Default for JobScheduler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl JobScheduler {
     pub fn new() -> Self {
         Self {

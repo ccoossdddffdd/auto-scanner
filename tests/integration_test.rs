@@ -1,3 +1,4 @@
+use auto_scanner::core::config::AppConfig;
 use auto_scanner::services::master::{self, MasterConfig};
 use std::env;
 use std::fs;
@@ -60,8 +61,12 @@ async fn test_end_to_end_workflow() {
     // 5. Run Master in a separate task
     let input_dir_str = input_dir.to_str().unwrap().to_string();
     env::set_var("INPUT_DIR", &input_dir_str);
+    
+    // Create AppConfig
+    let app_config = AppConfig::new(config).expect("Failed to create AppConfig");
+
     let master_handle = tokio::spawn(async move {
-        if let Err(e) = master::run(config).await {
+        if let Err(e) = master::run(app_config).await {
             eprintln!("Master process failed: {:?}", e);
         }
     });

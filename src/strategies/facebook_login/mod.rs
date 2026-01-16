@@ -371,10 +371,11 @@ impl<'a> LoginStatusDetector<'a> {
     }
 
     async fn check_account_locked(&self, adapter: &dyn BrowserAdapter, url: &str) -> bool {
-        if url.contains("/checkpoint") {
-            if !url.contains("two_step") && !url.contains("2fa") {
-                return true;
-            }
+        if url.contains("/checkpoint")
+            && !url.contains("two_step")
+            && !url.contains("2fa")
+        {
+            return true;
         }
 
         if url.contains("locked") || url.contains("disabled") || url.contains("suspended") {

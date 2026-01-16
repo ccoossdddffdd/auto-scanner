@@ -5,6 +5,125 @@ use playwright::Playwright;
 use tokio::time::{timeout, Duration};
 use tracing::info;
 
+pub struct PlaywrightAdapterBuilder {
+    remote_url: String,
+    connect_timeout: Duration,
+}
+
+impl PlaywrightAdapterBuilder {
+    pub fn new(remote_url: impl Into<String>) -> Self {
+        Self {
+            remote_url: remote_url.into(),
+            connect_timeout: Duration::from_secs(10),
+        }
+    }
+
+    pub fn connect_timeout(mut self, timeout: Duration) -> Self {
+        self.connect_timeout = timeout;
+        self
+    }
+
+    pub async fn build(self) -> Result<PlaywrightAdapter, BrowserError> {
+        info!("正在初始化 Playwright...");
+        let playwright = Playwright::initialize().await.map_err(|e| {
+            BrowserError::ConnectionFailed(format!("初始化 Playwright 失败: {}", e))
+        })?;
+
+        let chromium = playwright.chromium();
+
+        info!(
+            "正在连接到浏览器 {} ({:?} 超时)...",
+            self.remote_url, self.connect_timeout
+        );
+
+        let browser = match timeout(
+            self.connect_timeout,
+            chromium
+                .connect_over_cdp_builder(&self.remote_url)
+                .connect_over_cdp(),
+        )
+        .await
+        {
+            Ok(result) => result.map_err(|e| {
+                let msg = Self::format_connection_error(&e);
+                BrowserError::ConnectionFailed(msg)
+            })?,
+            Err(_) => {
+                return Err(BrowserError::ConnectionFailed(format!(
+                    "连接到 {} 超时 ({:?})",
+                    self.remote_url, self.connect_timeout
+                )));
+            }
+        };
+
+        info!("成功连接到浏览器。");
+
+        let context = Self::get_or_create_context(&browser).await?;
+        let page = Self::get_or_create_page(&context).await?;
+
+        Ok(PlaywrightAdapter {
+            _playwright: playwright,
+            _browser: browser,
+            _context: context,
+            page,
+        })
+    }
+
+    async fn get_or_create_context(browser: &Browser) -> Result<BrowserContext, BrowserError> {
+        info!("正在获取浏览器上下文...");
+        let contexts = browser
+            .contexts()
+            .map_err(|e| BrowserError::Other(format!("获取上下文失败: {}", e)))?;
+
+        if let Some(ctx) = contexts.into_iter().next() {
+            info!("使用现有上下文。");
+            Ok(ctx)
+        } else {
+            info!("正在创建新上下文...");
+            browser
+                .context_builder()
+                .build()
+                .await
+                .map_err(|e| BrowserError::Other(format!("创建上下文失败: {}", e)))
+        }
+    }
+
+    async fn get_or_create_page(context: &BrowserContext) -> Result<Page, BrowserError> {
+        info!("正在获取页面...");
+        let pages = context
+            .pages()
+            .map_err(|e| BrowserError::Other(format!("获取页面失败: {}", e)))?;
+
+        if let Some(p) = pages.into_iter().next() {
+            info!("使用现有页面。");
+            Ok(p)
+        } else {
+            info!("正在创建新页面...");
+            context
+                .new_page()
+                .await
+                .map_err(|e| BrowserError::Other(format!("创建新页面失败: {}", e)))
+        }
+    }
+
+    fn format_connection_error(e: &playwright::Error) -> String {
+        format!(
+            "通过 CDP 连接失败: {}.\n\
+             请确保 Chrome 已启用远程调试运行。\n\
+             \n\
+             Mac:\n\
+             /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-debug\n\
+             \n\
+             Windows:\n\
+             start chrome.exe --remote-debugging-port=9222 --user-data-dir=C:\\tmp\\chrome-debug\n\
+             \n\
+             Linux:\n\
+             google-chrome --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-debug\n",
+            e
+        )
+    }
+}
+
 pub struct PlaywrightAdapter {
     _playwright: Playwright,
     _browser: Browser,
@@ -14,92 +133,7 @@ pub struct PlaywrightAdapter {
 
 impl PlaywrightAdapter {
     pub async fn new(remote_url: &str) -> Result<Self, BrowserError> {
-        info!("正在初始化 Playwright...");
-        let playwright = Playwright::initialize().await.map_err(|e| {
-            BrowserError::ConnectionFailed(format!("初始化 Playwright 失败: {}", e))
-        })?;
-
-        let chromium = playwright.chromium();
-
-        info!(
-            "正在连接到浏览器 {} (10s 超时)...",
-            remote_url
-        );
-        let browser = match timeout(
-            Duration::from_secs(10),
-            chromium
-                .connect_over_cdp_builder(remote_url)
-                .connect_over_cdp(),
-        )
-        .await
-        {
-            Ok(result) => result.map_err(|e| {
-                let msg = format!(
-                    "通过 CDP 连接失败: {}.\n\
-                     请确保 Chrome 已启用远程调试运行。\n\
-                     \n\
-                     Mac:\n\
-                     /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-debug\n\
-                     \n\
-                     Windows:\n\
-                     start chrome.exe --remote-debugging-port=9222 --user-data-dir=C:\\tmp\\chrome-debug\n\
-                     \n\
-                     Linux:\n\
-                     google-chrome --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-debug\n",
-                    e
-                );
-                BrowserError::ConnectionFailed(msg)
-            })?,
-            Err(_) => {
-                return Err(BrowserError::ConnectionFailed(format!(
-                    "连接到 {} 超时 (10s)",
-                    remote_url
-                )));
-            }
-        };
-
-        info!("成功连接到浏览器。");
-
-        info!("正在获取浏览器上下文...");
-        let contexts = browser
-            .contexts()
-            .map_err(|e| BrowserError::Other(format!("获取上下文失败: {}", e)))?;
-
-        let context = contexts.into_iter().next();
-        let context = if let Some(ctx) = context {
-            info!("使用现有上下文。");
-            ctx
-        } else {
-            info!("正在创建新上下文...");
-            browser
-                .context_builder()
-                .build()
-                .await
-                .map_err(|e| BrowserError::Other(format!("创建上下文失败: {}", e)))?
-        };
-
-        info!("正在获取页面...");
-        let pages = context
-            .pages()
-            .map_err(|e| BrowserError::Other(format!("获取页面失败: {}", e)))?;
-
-        let page = if let Some(p) = pages.into_iter().next() {
-            info!("使用现有页面。");
-            p
-        } else {
-            info!("正在创建新页面...");
-            context
-                .new_page()
-                .await
-                .map_err(|e| BrowserError::Other(format!("创建新页面失败: {}", e)))?
-        };
-
-        Ok(Self {
-            _playwright: playwright,
-            _browser: browser,
-            _context: context,
-            page,
-        })
+        PlaywrightAdapterBuilder::new(remote_url).build().await
     }
 }
 

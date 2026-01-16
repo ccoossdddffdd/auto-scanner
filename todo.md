@@ -1,26 +1,33 @@
 # Refactoring Plan
 
-- [ ] **1. Normalize IPC Communication**
-    - [ ] Modify `src/services/worker/runner.rs` to output results with frame delimiters (e.g., `<<RESULT>>...<<RESULT>>`).
-    - [ ] Modify the Master side (likely `src/services/worker/coordinator.rs` or `processor.rs`) to parse the delimited JSON, ignoring other stdout noise.
+- [x] **1. Normalize IPC Communication**
+- [x] **2. Abstract Browser Environment Interface**
+- [x] **3. Extract File Policy Service**
+- [x] **4. Centralized Configuration**
+- [x] **5. Deconstruct `MasterContext::run`**
 
-- [ ] **2. Abstract Browser Environment Interface**
-    - [ ] Define `BrowserEnvironmentManager` trait.
-    - [ ] Implement trait for `AdsPowerClient`.
-    - [ ] Update `MasterContext` to use `Box<dyn BrowserEnvironmentManager>`.
+# Phase 2 Refactoring
 
-- [ ] **3. Extract File Policy Service**
-    - [ ] Create `src/services/file_policy.rs`.
-    - [ ] Move file extension checking and ignore rules from `master.rs`.
-    - [ ] Move path generation logic from `processor.rs`.
+- [ ] **1. Refactor EmailMonitor**
+    - [ ] Create `ImapService` trait and implementation.
+    - [ ] Extract `AttachmentHandler`.
+    - [ ] Extract `EmailProcessor`.
+    - [ ] Update `EmailMonitor` to use dependency injection.
 
-- [ ] **4. Centralized Configuration**
-    - [ ] Create `src/core/config.rs` (or `src/config.rs`).
-    - [ ] Define `AppConfig` struct.
-    - [ ] Refactor `main.rs` to load config.
-    - [ ] Inject config into services instead of using `std::env::var`.
+- [ ] **2. Decouple WorkerCoordinator Strategy**
+    - [ ] Create `StrategyProfileProvider` trait.
+    - [ ] Implement provider for Facebook strategy.
+    - [ ] Inject provider into `WorkerCoordinator`.
 
-- [ ] **5. Deconstruct `MasterContext::run`**
-    - [ ] Extract `InputWatcher` for file events.
-    - [ ] Extract `JobScheduler` for concurrency management.
-    - [ ] Simplify `master.rs` to coordinate these components.
+- [ ] **3. Extract Worker Process Executor**
+    - [ ] Create `ProcessExecutor` trait.
+    - [ ] Extract `WorkerOutputParser` struct.
+    - [ ] Refactor `WorkerCoordinator` to use executor.
+
+- [ ] **4. Purify File Operations**
+    - [ ] Refactor `prepare_input_file` to return status instead of calling monitor.
+    - [ ] Move monitor update logic to `Master` or `Processor`.
+
+- [ ] **5. PlaywrightAdapter Builder**
+    - [ ] Create `PlaywrightAdapterBuilder`.
+    - [ ] Simplify `PlaywrightAdapter::new`.

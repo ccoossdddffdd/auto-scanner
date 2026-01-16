@@ -1,12 +1,10 @@
 use crate::core::models::WorkerResult;
-use crate::services::email::monitor::EmailMonitor;
 use crate::services::file::get_account_source;
 use crate::services::file_policy::FilePolicyService;
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::info;
 
 pub async fn convert_txt_to_csv(path: &Path) -> Result<PathBuf> {
     info!("正在将 TXT 转换为 CSV: {:?}", path);
@@ -41,10 +39,7 @@ pub fn rename_processed_file(path: &Path, doned_dir: &Path) -> Result<PathBuf> {
     Ok(new_path)
 }
 
-pub async fn prepare_input_file(
-    path: &Path,
-    email_monitor: &Option<Arc<EmailMonitor>>,
-) -> Result<PathBuf> {
+pub async fn ensure_csv_format(path: &Path) -> Result<(PathBuf, bool)> {
     let extension = path
         .extension()
         .and_then(|e| e.to_str())
@@ -52,21 +47,14 @@ pub async fn prepare_input_file(
         .to_lowercase();
 
     if extension != "txt" {
-        return Ok(path.to_path_buf());
+        return Ok((path.to_path_buf(), false));
     }
 
     let new_path = convert_txt_to_csv(path).await?;
-
-    if let Some(monitor) = email_monitor {
-        if let Err(e) = monitor.get_file_tracker().update_file_path(path, &new_path) {
-            warn!("更新文件追踪器路径失败: {}", e);
-        }
-    }
-
     fs::remove_file(path).context("删除原始 TXT 文件失败")?;
     info!("已将 {:?} 转换为 CSV 并删除原文件", path);
 
-    Ok(new_path)
+    Ok((new_path, true))
 }
 
 pub async fn write_results_and_rename(

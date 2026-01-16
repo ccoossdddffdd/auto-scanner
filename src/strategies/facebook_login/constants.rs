@@ -1,22 +1,11 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct FacebookConfig {
     pub timeouts: Timeouts,
     pub selectors: Selectors,
     pub keywords: Keywords,
     pub urls: Urls,
-}
-
-impl Default for FacebookConfig {
-    fn default() -> Self {
-        Self {
-            timeouts: Timeouts::default(),
-            selectors: Selectors::default(),
-            keywords: Keywords::default(),
-            urls: Urls::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

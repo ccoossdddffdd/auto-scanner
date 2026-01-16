@@ -1,16 +1,13 @@
-use crate::infrastructure::imap::{ImapClient, ImapSession};
-use crate::services::email::attachment::{Attachment, AttachmentHandler};
+use crate::infrastructure::imap::ImapClient;
 use crate::services::email::config::EmailConfig;
+use crate::services::email::imap_service::ImapService;
 use crate::services::email::notification::EmailNotifier;
-use crate::services::email::parser::EmailParser;
+use crate::services::email::processor::EmailProcessor;
 use crate::services::email::tracker::FileTracker;
 use anyhow::{Context, Result};
-use chrono::Local;
-use futures::StreamExt;
-use mail_parser::MessageParser;
-use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
 /// 邮件监控器
@@ -18,6 +15,8 @@ pub struct EmailMonitor {
     config: EmailConfig,
     file_tracker: Arc<FileTracker>,
     notifier: EmailNotifier,
+    imap_service: Mutex<Box<dyn ImapService>>,
+    processor: EmailProcessor,
 }
 
 impl EmailMonitor {
@@ -30,10 +29,25 @@ impl EmailMonitor {
             config.password.clone(),
         );
 
+        let imap_service = Box::new(ImapClient::new(
+            config.imap_server.clone(),
+            config.imap_port,
+            config.username.clone(),
+            config.password.clone(),
+        ));
+
+        let processor = EmailProcessor::new(
+            file_tracker.clone(),
+            config.input_dir.clone(),
+            config.subject_filter.clone(),
+        );
+
         Ok(Self {
             config,
             file_tracker,
             notifier,
+            imap_service: Mutex::new(imap_service),
+            processor,
         })
     }
 
@@ -76,22 +90,35 @@ impl EmailMonitor {
 
     /// 检查并处理新邮件
     async fn check_and_process_emails(&self) -> Result<()> {
-        let mut session = self.create_imap_session().await?;
-        let uid_set = self.search_unread_emails(&mut session).await?;
+        let mut imap_service = self.imap_service.lock().await;
+        imap_service.connect().await?;
+        let uids = imap_service.search_unseen().await?;
 
-        if uid_set.is_empty() {
+        if uids.is_empty() {
             info!("No new unread emails found");
-            session
+            imap_service
                 .logout()
                 .await
                 .context("Failed to logout from IMAP")?;
             return Ok(());
         }
 
-        info!("Found {} unread emails", uid_set.len());
-        self.process_email_batch(&uid_set, &mut session).await?;
+        info!("Found {} unread emails", uids.len());
+        
+        // 我们不能在 process_email_batch 中持有锁，因为那会导致长时间的锁定
+        // 但是 ImapService 本身是有状态的（session），如果我们在循环中每次都 lock，
+        // 那么多个任务可能会交错使用同一个 session（虽然 ImapClient 是同步的，这里用 async mutex 保证互斥）
+        // 实际上 check_and_process_emails 是被 start_monitoring 循环调用的，而 start_monitoring 本身是单任务的。
+        // 除非有其他地方也调用 check_and_process_emails（目前没有）。
+        // 所以在这里持有锁是安全的。
+        
+        for uid in uids {
+            if let Err(e) = self.fetch_and_process_email(uid, &mut **imap_service).await {
+                error!("Failed to process email UID {}: {}", uid, e);
+            }
+        }
 
-        session
+        imap_service
             .logout()
             .await
             .context("Failed to logout from IMAP")?;
@@ -99,81 +126,17 @@ impl EmailMonitor {
         Ok(())
     }
 
-    /// 创建 IMAP 会话
-    async fn create_imap_session(&self) -> Result<ImapSession> {
-        let imap_client = ImapClient::new(
-            self.config.imap_server.clone(),
-            self.config.imap_port,
-            self.config.username.clone(),
-            self.config.password.clone(),
-        );
-        imap_client.connect().await
-    }
-
-    /// 搜索未读邮件
-    async fn search_unread_emails(&self, session: &mut ImapSession) -> Result<Vec<u32>> {
-        let inbox = session
-            .select("INBOX")
-            .await
-            .context("Failed to select INBOX")?;
-
-        info!("Mailbox selected: {:?}", inbox);
-
-        let search_result = session
-            .search("UNSEEN")
-            .await
-            .context("Failed to search for unread emails")?;
-
-        Ok(search_result.iter().copied().collect())
-    }
-
-    /// 批量处理邮件
-    async fn process_email_batch(&self, uids: &[u32], session: &mut ImapSession) -> Result<()> {
-        for uid in uids {
-            if let Err(e) = self.fetch_and_process_email(*uid, session).await {
-                error!("Failed to process email UID {}: {}", uid, e);
-            }
-        }
-        Ok(())
-    }
-
     /// 获取并处理单个邮件
-    async fn fetch_and_process_email(&self, uid: u32, session: &mut ImapSession) -> Result<()> {
-        let email_data = self.fetch_email_data(uid, session).await?;
+    async fn fetch_and_process_email(&self, uid: u32, imap_service: &mut dyn ImapService) -> Result<()> {
+        let raw_data = imap_service.fetch_email(uid).await?;
 
-        let msg =
-            email_data.ok_or_else(|| anyhow::anyhow!("No data returned for email UID {}", uid))?;
+        let raw_bytes =
+            raw_data.ok_or_else(|| anyhow::anyhow!("No data returned for email UID {}", uid))?;
 
-        if let Some(raw) = msg.body() {
-            let parsed = MessageParser::default()
-                .parse(raw)
-                .context("Failed to parse email")?;
-
-            self.process_email_workflow(uid, &parsed, session).await?;
-        } else {
-            warn!("Unexpected fetch result type for email UID {}", uid);
-        }
+        let parsed = self.processor.parse_email(&raw_bytes)?;
+        self.process_email_workflow(uid, &parsed, imap_service).await?;
 
         Ok(())
-    }
-
-    /// 获取邮件数据
-    async fn fetch_email_data(
-        &self,
-        uid: u32,
-        session: &mut ImapSession,
-    ) -> Result<Option<async_imap::types::Fetch>> {
-        let mut fetch_stream = session
-            .fetch(uid.to_string(), "RFC822")
-            .await
-            .context("Failed to fetch email")?;
-
-        let mut data = None;
-        if let Some(msg) = fetch_stream.next().await {
-            data = Some(msg.context("Failed to read fetch result")?);
-        }
-
-        Ok(data)
     }
 
     /// 处理邮件工作流
@@ -181,28 +144,17 @@ impl EmailMonitor {
         &self,
         uid: u32,
         parsed: &mail_parser::Message<'_>,
-        session: &mut ImapSession,
+        imap_service: &mut dyn ImapService,
     ) -> Result<()> {
-        let from = EmailParser::parse_from_address(parsed);
-        let subject = EmailParser::parse_subject(parsed);
-
-        info!("Processing email from: {}, subject: {}", from, subject);
-
-        // 检查主题过滤
-        if !subject.contains(&self.config.subject_filter) {
-            info!(
-                "Email subject does not contain '{}', skipping",
-                self.config.subject_filter
-            );
+        if !self.processor.should_process(parsed) {
             return Ok(());
         }
 
-        // 注册邮件
-        self.file_tracker.register_email(&uid.to_string())?;
+        let (from, subject) = self.processor.extract_metadata(parsed);
+        info!("Processing email from: {}, subject: {}", from, subject);
 
         // 处理附件
-        self.process_attachments(uid, parsed, &from, session)
-            .await?;
+        self.process_attachments(uid, parsed, &from, imap_service).await?;
 
         Ok(())
     }
@@ -213,9 +165,9 @@ impl EmailMonitor {
         uid: u32,
         parsed: &mail_parser::Message<'_>,
         from: &str,
-        session: &mut ImapSession,
+        imap_service: &mut dyn ImapService,
     ) -> Result<()> {
-        let attachments = AttachmentHandler::extract_attachments(parsed);
+        let attachments = self.processor.get_attachments(parsed);
 
         if attachments.is_empty() {
             info!("Email has no valid attachments");
@@ -228,11 +180,13 @@ impl EmailMonitor {
 
         // 下载所有有效附件
         for attachment in &attachments {
-            let _ = self.download_attachment(uid, attachment, from).await?;
+            let _ = self
+                .processor
+                .save_attachment(uid, attachment, from)?;
         }
 
         // 标记邮件已读并移动到"已处理"文件夹
-        self.mark_and_move_email(uid, session).await?;
+        self.mark_and_move_email(uid, imap_service).await?;
 
         Ok(())
     }
@@ -251,73 +205,23 @@ impl EmailMonitor {
             .await?;
 
         // 标记为失败
-        self.file_tracker
-            .mark_failed(&uid.to_string(), error_message.to_string(), None)?;
+        self.processor.mark_failed(uid, error_message)?;
 
         Ok(())
     }
 
-    /// 下载附件
-    async fn download_attachment(
-        &self,
-        uid: u32,
-        attachment: &Attachment,
-        from: &str,
-    ) -> Result<PathBuf> {
-        info!("Downloading attachment: {}", attachment.filename);
-
-        let timestamp = Local::now().format("%Y%m%d-%H%M%S").to_string();
-        let safe_filename = format!("{}_{}", timestamp, attachment.filename);
-        let file_path = self.config.input_dir.join(&safe_filename);
-
-        fs::write(&file_path, &attachment.data).context("Failed to write attachment to file")?;
-
-        info!("Attachment saved to: {:?}", file_path);
-
-        // 存储元数据
-        use crate::services::email::tracker::EmailMetadata;
-        let metadata = EmailMetadata {
-            from: from.to_string(),
-            subject: format!("Email UID: {}", uid),
-            original_filename: attachment.filename.clone(),
-        };
-
-        if let Err(e) = self.file_tracker.register_email(&uid.to_string()) {
-            warn!("Failed to register email: {}", e);
-        }
-        if let Err(e) = self
-            .file_tracker
-            .store_email_metadata(&uid.to_string(), metadata)
-        {
-            warn!("Failed to store email metadata: {}", e);
-        }
-
-        if let Err(e) = self
-            .file_tracker
-            .mark_downloaded(&uid.to_string(), file_path.clone())
-        {
-            warn!("Failed to mark email as downloaded: {}", e);
-        }
-
-        Ok(file_path)
-    }
-
     /// 标记并移动邮件
-    async fn mark_and_move_email(&self, uid: u32, session: &mut ImapSession) -> Result<()> {
+    async fn mark_and_move_email(&self, uid: u32, imap_service: &mut dyn ImapService) -> Result<()> {
         info!("Marking email {} as read and moving to processed", uid);
 
         // 标记已读
-        if let Err(e) = session.store(format!("{}", uid), "+FLAGS (\\Seen)").await {
+        if let Err(e) = imap_service.mark_as_read(uid).await {
             warn!("Failed to mark email as read: {}", e);
         }
 
         // 移动到已处理文件夹
-        let dest_folder = &self.config.processed_folder;
-        if let Err(e) = session
-            .mv(format!("{}", uid), dest_folder)
-            .await
-            .context(format!("Failed to move email to {}", dest_folder))
-        {
+        let dest_folder = self.config.processed_folder.clone();
+        if let Err(e) = imap_service.move_email(uid, &dest_folder).await {
             warn!("Could not move email: {}", e);
             // 不返回错误，因为邮件已经处理完成
         }

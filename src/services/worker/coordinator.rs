@@ -1,5 +1,10 @@
 use crate::core::models::{Account, WorkerResult};
 use crate::infrastructure::browser_manager::BrowserEnvironmentManager;
+use crate::services::worker::output_parser::WorkerOutputParser;
+use crate::services::worker::process_executor::{ProcessExecutor, TokioProcessExecutor};
+use crate::services::worker::strategy_provider::{
+    DefaultStrategyProfileProvider, StrategyProfileProvider,
+};
 use anyhow::Result;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -21,9 +26,33 @@ pub struct WorkerCoordinator {
     pub backend: String,
     pub remote_url: String,
     pub strategy: String,
+    pub strategy_provider: Arc<dyn StrategyProfileProvider>,
+    pub process_executor: Arc<dyn ProcessExecutor>,
 }
 
 impl WorkerCoordinator {
+    pub fn new(
+        permit_rx: async_channel::Receiver<usize>,
+        permit_tx: async_channel::Sender<usize>,
+        adspower: Option<Arc<dyn BrowserEnvironmentManager>>,
+        exe_path: PathBuf,
+        backend: String,
+        remote_url: String,
+        strategy: String,
+    ) -> Self {
+        Self {
+            permit_rx,
+            permit_tx,
+            adspower,
+            exe_path,
+            backend,
+            remote_url,
+            strategy,
+            strategy_provider: Arc::new(DefaultStrategyProfileProvider),
+            process_executor: Arc::new(TokioProcessExecutor),
+        }
+    }
+
     pub async fn spawn_worker(
         &self,
         index: usize,
@@ -87,12 +116,8 @@ impl WorkerCoordinator {
     ) -> Option<AdsPowerSession> {
         let client = self.adspower.as_ref()?;
 
-        // Get strategy-specific profile config
-        let profile_config = if self.strategy == "facebook_login" {
-            Some(crate::strategies::facebook_login::get_profile_config())
-        } else {
-            None
-        };
+        // 使用策略提供者获取配置，消除硬编码
+        let profile_config = self.strategy_provider.get_profile_config(&self.strategy);
 
         let profile_id = match client
             .ensure_profile_for_thread(thread_index, profile_config.as_ref())
@@ -138,28 +163,12 @@ impl WorkerCoordinator {
     }
 
     /// 执行 Worker 进程
-    async fn execute_worker(&self, mut cmd: Command, username: &str) -> Result<WorkerResult> {
-        // Set a timeout for the worker process to prevent hanging indefinitely
-        // Default to 5 minutes (300 seconds) which should be enough for a login attempt
-        let timeout_duration = std::time::Duration::from_secs(300);
-
-        let output = match tokio::time::timeout(timeout_duration, cmd.output()).await {
-            Ok(Ok(output)) => output,
-            Ok(Err(e)) => anyhow::bail!("运行 Worker 进程失败: {}", e),
-            Err(_) => anyhow::bail!("Worker 在 {} 秒后超时", timeout_duration.as_secs()),
-        };
-
+    async fn execute_worker(&self, cmd: Command, username: &str) -> Result<WorkerResult> {
+        let output = self.process_executor.execute(cmd).await?;
         let stdout = String::from_utf8_lossy(&output.stdout);
-        // Parse the output looking for the framed result: <<WORKER_RESULT>>{json}<<WORKER_RESULT>>
-        // This regex-like search ensures we ignore any other logs printed to stdout
-        if let Some(start_idx) = stdout.find("<<WORKER_RESULT>>") {
-            let content_start = start_idx + "<<WORKER_RESULT>>".len();
-            if let Some(end_idx) = stdout[content_start..].find("<<WORKER_RESULT>>") {
-                let json_str = &stdout[content_start..content_start + end_idx];
-                if let Ok(result) = serde_json::from_str::<WorkerResult>(json_str) {
-                    return Ok(result);
-                }
-            }
+
+        if let Some(result) = WorkerOutputParser::parse(&stdout) {
+            return Ok(result);
         }
 
         anyhow::bail!("{} 的 Worker 未返回有效的 JSON 结果", username)

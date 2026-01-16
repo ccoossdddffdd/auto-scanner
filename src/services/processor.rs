@@ -2,7 +2,7 @@ use crate::core::models::{Account, WorkerResult};
 use crate::infrastructure::browser_manager::BrowserEnvironmentManager;
 use crate::services::email::monitor::EmailMonitor;
 use crate::services::file::get_account_source;
-use crate::services::file::operation::{prepare_input_file, write_results_and_rename};
+use crate::services::file::operation::{ensure_csv_format, write_results_and_rename};
 use crate::services::worker::coordinator::WorkerCoordinator;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
@@ -107,7 +107,16 @@ pub async fn process_file(
     permit_tx: async_channel::Sender<usize>,
     email_monitor: Option<Arc<EmailMonitor>>,
 ) -> Result<PathBuf> {
-    let path_to_process = prepare_input_file(path, &email_monitor).await?;
+    let (path_to_process, converted) = ensure_csv_format(path).await?;
+    
+    if converted {
+        if let Some(monitor) = &email_monitor {
+            if let Err(e) = monitor.get_file_tracker().update_file_path(path, &path_to_process) {
+                warn!("更新文件追踪器路径失败: {}", e);
+            }
+        }
+    }
+
     let email_id = extract_email_id(&path_to_process, &email_monitor);
 
     let processing_result =
@@ -165,15 +174,15 @@ async fn spawn_workers(
     permit_rx: async_channel::Receiver<usize>,
     permit_tx: async_channel::Sender<usize>,
 ) -> Vec<(usize, Option<WorkerResult>)> {
-    let coordinator = Arc::new(WorkerCoordinator {
+    let coordinator = Arc::new(WorkerCoordinator::new(
         permit_rx,
         permit_tx,
-        adspower: config.browser.adspower.clone(),
-        exe_path: config.worker.exe_path.clone(),
-        backend: config.browser.backend.clone(),
-        remote_url: config.browser.remote_url.clone(),
-        strategy: config.worker.strategy.clone(),
-    });
+        config.browser.adspower.clone(),
+        config.worker.exe_path.clone(),
+        config.browser.backend.clone(),
+        config.browser.remote_url.clone(),
+        config.worker.strategy.clone(),
+    ));
 
     let mut handles = Vec::new();
     for (index, account) in accounts.iter().enumerate() {
