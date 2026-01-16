@@ -8,6 +8,13 @@ use std::fs;
 use std::path::Path;
 use tracing::info;
 
+pub mod constants;
+use constants::FacebookConfig;
+
+// Initialize global configuration
+static CONFIG: once_cell::sync::Lazy<FacebookConfig> =
+    once_cell::sync::Lazy::new(FacebookConfig::default);
+
 #[derive(Default)]
 pub struct FacebookLoginStrategy;
 
@@ -70,11 +77,11 @@ impl LoginResultDetector {
 
         // 检查是否还存在登录表单（如果存在说明未登录）
         let email_visible = adapter
-            .is_visible("input[name='email']")
+            .is_visible(&CONFIG.selectors.login_form.email)
             .await
             .unwrap_or(false);
         let pass_visible = adapter
-            .is_visible("input[name='pass']")
+            .is_visible(&CONFIG.selectors.login_form.pass)
             .await
             .unwrap_or(false);
 
@@ -89,24 +96,23 @@ impl LoginResultDetector {
         }
 
         // 检查登录成功后才有的元素
-        let success_indicators = [
-            // 个人资料/账号菜单按钮
-            "[aria-label*='Your profile']",
-            "[aria-label*='Account']",
-            "[aria-label*='个人主页']",
-            // 创建帖子区域
-            "[role='dialog']",
-            "div[role='main']",
-            // 搜索框
-            "input[type='search']",
-            "input[aria-label*='Search']",
-        ];
-
-        for selector in &success_indicators {
+        // 个人资料/账号菜单按钮
+        for selector in &CONFIG.selectors.indicators.profile {
             if let Ok(visible) = adapter.is_visible(selector).await {
-                info!("Checking success indicator '{}': {}", selector, visible);
+                info!("Checking profile indicator '{}': {}", selector, visible);
                 if visible {
-                    info!("Found success indicator: {}", selector);
+                    info!("Found profile indicator: {}", selector);
+                    return true;
+                }
+            }
+        }
+
+        // 通用成功元素
+        for selector in &CONFIG.selectors.indicators.elements {
+            if let Ok(visible) = adapter.is_visible(selector).await {
+                info!("Checking success element '{}': {}", selector, visible);
+                if visible {
+                    info!("Found success element: {}", selector);
                     return true;
                 }
             }
@@ -120,34 +126,19 @@ impl LoginResultDetector {
         // 方法1: 检查 URL 是否包含验证码标识
         if let Ok(url) = adapter.get_current_url().await {
             if url.contains("captcha")
-                || url.contains("checkpoint") && url.contains("828281030927956")
+                || CONFIG
+                    .urls
+                    .checkpoints
+                    .iter()
+                    .any(|id| url.contains("checkpoint") && url.contains(id))
             {
-                // 828281030927956 是 Facebook 验证码 checkpoint 的特定 ID
                 info!("URL indicates captcha required");
                 return true;
             }
         }
 
         // 方法2: 检查特定的验证码元素
-        let captcha_selectors = [
-            // 传统验证码输入框
-            "input[name='captcha_response']",
-            // reCAPTCHA iframe
-            "iframe[src*='recaptcha']",
-            "iframe[title*='reCAPTCHA']",
-            "iframe[title*='recaptcha']",
-            // hCaptcha
-            "iframe[src*='hcaptcha']",
-            "div[class*='hcaptcha']",
-            // Facebook 自己的验证码
-            "div[data-testid='captcha']",
-            "div[id*='captcha']",
-            // 验证码图片
-            "img[alt*='captcha']",
-            "img[src*='captcha']",
-        ];
-
-        for selector in &captcha_selectors {
+        for selector in &CONFIG.selectors.captcha {
             if let Ok(visible) = adapter.is_visible(selector).await {
                 if visible {
                     info!("Found captcha element: {}", selector);
@@ -157,70 +148,14 @@ impl LoginResultDetector {
         }
 
         // 方法3: 检查错误消息中的验证码关键词
-        let error_selectors = [
-            "div[role='alert']",
-            "div._9ay7",
-            "#error_box",
-            "div[data-testid='error_message']",
-        ];
-
-        for selector in &error_selectors {
+        for selector in &CONFIG.selectors.error_containers {
             if let Ok(visible) = adapter.is_visible(selector).await {
                 if visible {
                     if let Ok(text) = adapter.get_text(selector).await {
                         let text_lower = text.to_lowercase();
                         info!("Checking error message for captcha: {}", text);
 
-                        // 多语言验证码关键词
-                        let captcha_keywords = [
-                            // 英语
-                            "captcha",
-                            "verification",
-                            "verify",
-                            "security check",
-                            "confirm you're human",
-                            "prove you're human",
-                            // 中文
-                            "验证码",
-                            "安全检查",
-                            "验证",
-                            "人机验证",
-                            "证明你不是机器人",
-                            // 西班牙语
-                            "verificación",
-                            "comprobar",
-                            // 法语
-                            "vérification",
-                            "vérifier",
-                            // 德语
-                            "verifizierung",
-                            "überprüfung",
-                            // 葡萄牙语
-                            "verificação",
-                            "verificar",
-                            // 日语
-                            "認証",
-                            "確認",
-                            // 韩语
-                            "인증",
-                            "확인",
-                            // 越南语
-                            "xác minh",
-                            "xác nhận",
-                            // 印尼语
-                            "verifikasi",
-                            "memverifikasi",
-                            // 泰语
-                            "การยืนยัน",
-                            "ตรวจสอบ",
-                            // 阿拉伯语
-                            "التحقق",
-                            // 俄语
-                            "проверка",
-                            "капча",
-                        ];
-
-                        for keyword in &captcha_keywords {
+                        for keyword in &CONFIG.keywords.captcha {
                             if text_lower.contains(keyword) {
                                 info!("Detected captcha via keyword: {}", keyword);
                                 return true;
@@ -244,7 +179,7 @@ impl LoginResultDetector {
 
         // 检查页面元素
         adapter
-            .is_visible("input[name='approvals_code']")
+            .is_visible(&CONFIG.selectors.two_fa_input)
             .await
             .unwrap_or(false)
     }
@@ -258,61 +193,14 @@ impl LoginResultDetector {
         }
 
         // 方法2: 检查特定的错误元素
-        let error_selectors = [
-            "div[role='alert']",
-            "div._9ay7",
-            "div[data-testid='royal_login_error']",
-            "#error_box",
-        ];
-
-        for selector in &error_selectors {
+        for selector in &CONFIG.selectors.error_containers {
             if let Ok(visible) = adapter.is_visible(selector).await {
                 if visible {
                     if let Ok(text) = adapter.get_text(selector).await {
                         info!("Found error message for password check: {}", text);
 
-                        // 多语言密码错误关键词
-                        let password_keywords = [
-                            // 英语
-                            "password",
-                            "incorrect",
-                            "wrong",
-                            // 中文
-                            "密码",
-                            "错误",
-                            "不正确",
-                            // 西班牙语
-                            "contraseña",
-                            "incorrecta",
-                            // 法语
-                            "mot de passe",
-                            "incorrect",
-                            // 德语
-                            "passwort",
-                            "falsch",
-                            // 葡萄牙语
-                            "senha",
-                            "incorreta",
-                            // 日语
-                            "パスワード",
-                            "ログイン情報",
-                            "誤り",
-                            // 韩语
-                            "비밀번호",
-                            // 越南语
-                            "mật khẩu",
-                            "sai",
-                            // 印尼语
-                            "kata sandi",
-                            "salah",
-                            // 泰语
-                            "รหัสผ่าน",
-                            // 阿拉伯语
-                            "كلمة المرور",
-                        ];
-
                         // 先检查原文本（支持大小写敏感的非拉丁字符）
-                        for keyword in &password_keywords {
+                        for keyword in &CONFIG.keywords.wrong_password {
                             if text.contains(keyword) {
                                 info!("Detected wrong password via keyword: {}", keyword);
                                 return true;
@@ -321,7 +209,7 @@ impl LoginResultDetector {
 
                         // 再检查小写文本（支持拉丁字符的大小写不敏感匹配）
                         let text_lower = text.to_lowercase();
-                        for keyword in &password_keywords {
+                        for keyword in &CONFIG.keywords.wrong_password {
                             if text_lower.contains(&keyword.to_lowercase()) {
                                 info!(
                                     "Detected wrong password via keyword (case-insensitive): {}",
@@ -359,83 +247,21 @@ impl LoginResultDetector {
         }
 
         // 方法2: 检查特定的锁定页面元素
-        let locked_indicators = [
-            // 账号锁定页面的特征元素
-            "div[data-testid='account_locked']",
-            "div[data-testid='checkpoint_locked']",
-            // 通用的限制/审核提示
-            "button[name='submit[Continue]']", // checkpoint 页面通常有这个
-        ];
-
-        for selector in &locked_indicators {
+        for selector in &CONFIG.selectors.locked_indicators {
             if adapter.is_visible(selector).await.unwrap_or(false) {
                 info!("Found account locked indicator element: {}", selector);
             }
         }
 
         // 方法3: 检查错误消息文本
-        let error_selectors = [
-            "div[role='alert']",
-            "div._9ay7",
-            "#error_box",
-            "div[data-testid='error_message']",
-        ];
-
-        for selector in &error_selectors {
+        for selector in &CONFIG.selectors.error_containers {
             if let Ok(visible) = adapter.is_visible(selector).await {
                 if visible {
                     if let Ok(text) = adapter.get_text(selector).await {
                         let text_lower = text.to_lowercase();
                         info!("Found error message for locked check: {}", text);
 
-                        // 多语言账号锁定关键词
-                        let locked_keywords = [
-                            // 英语
-                            "locked",
-                            "disabled",
-                            "suspended",
-                            "restricted",
-                            "temporarily",
-                            "violat",
-                            // 中文
-                            "锁定",
-                            "封禁",
-                            "停用",
-                            "限制",
-                            "暂时",
-                            "违反",
-                            // 西班牙语
-                            "bloqueada",
-                            "desactivada",
-                            "suspendida",
-                            // 法语
-                            "bloqué",
-                            "désactivé",
-                            "suspendu",
-                            // 德语
-                            "gesperrt",
-                            "deaktiviert",
-                            // 葡萄牙语
-                            "bloqueada",
-                            "desativada",
-                            // 日语
-                            "ロック",
-                            "無効",
-                            // 韩语
-                            "잠금",
-                            "비활성",
-                            // 越南语
-                            "bị khóa",
-                            "vô hiệu",
-                            // 印尼语
-                            "dikunci",
-                            "dinonaktifkan",
-                            // 泰语
-                            "ล็อค",
-                            "ปิดการใช้งาน",
-                        ];
-
-                        for keyword in &locked_keywords {
+                        for keyword in &CONFIG.keywords.account_locked {
                             if text_lower.contains(keyword) {
                                 info!("Detected account locked via keyword: {}", keyword);
                                 return true;
@@ -459,40 +285,51 @@ impl LoginStrategy for FacebookLoginStrategy {
         enable_screenshot: bool,
     ) -> Result<WorkerResult> {
         info!("Navigating to Facebook...");
-        adapter.navigate("https://www.facebook.com").await?;
+        adapter.navigate(&CONFIG.urls.base).await?;
 
         info!("Waiting for email input...");
-        adapter.wait_for_element("input[name='email']").await?;
+        adapter
+            .wait_for_element(&CONFIG.selectors.login_form.email)
+            .await?;
 
         // 检查当前域名，如果是移动版直接返回错误
         if let Ok(url) = adapter.get_current_url().await {
             info!("After navigation, current URL: {}", url);
-            if url.contains("m.facebook.com") {
+            if url.contains(&CONFIG.urls.mobile_check) {
                 anyhow::bail!(
-                    "Mobile version (m.facebook.com) is not supported. Please use desktop browser."
+                    "Mobile version ({}) is not supported. Please use desktop browser.",
+                    CONFIG.urls.mobile_check
                 );
             }
         }
 
         info!("Typing credentials...");
         adapter
-            .type_text("input[name='email']", &account.username)
+            .type_text(&CONFIG.selectors.login_form.email, &account.username)
             .await?;
         adapter
-            .type_text("input[name='pass']", &account.password)
+            .type_text(&CONFIG.selectors.login_form.pass, &account.password)
             .await?;
 
         info!("Clicking login button...");
-        adapter.click("button[name='login']").await?;
+        adapter
+            .click(&CONFIG.selectors.login_form.login_btn)
+            .await?;
 
         // Wait for navigation or state change
-        tokio::time::sleep(std::time::Duration::from_secs(8)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(
+            CONFIG.timeouts.login_wait_secs,
+        ))
+        .await;
 
         // 再次检查是否跳转到移动版
         if let Ok(url) = adapter.get_current_url().await {
             info!("After login, current URL: {}", url);
-            if url.contains("m.facebook.com") {
-                anyhow::bail!("Browser redirected to mobile version (m.facebook.com), which is not supported.");
+            if url.contains(&CONFIG.urls.mobile_check) {
+                anyhow::bail!(
+                    "Browser redirected to mobile version ({}), which is not supported.",
+                    CONFIG.urls.mobile_check
+                );
             }
         }
 
@@ -557,12 +394,15 @@ impl FacebookLoginStrategy {
 
         // 导航到好友页面
         adapter
-            .navigate("https://www.facebook.com/me/friends")
+            .navigate(&CONFIG.urls.friends)
             .await
             .context("Failed to navigate to friends page")?;
 
         // 等待页面加载
-        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(
+            CONFIG.timeouts.page_load_secs,
+        ))
+        .await;
 
         // 获取当前 URL 确认导航成功
         if let Ok(url) = adapter.get_current_url().await {
@@ -570,17 +410,7 @@ impl FacebookLoginStrategy {
         }
 
         // 尝试多个选择器获取好友数量
-        let selectors = [
-            // 好友页面标题中的数字（最准确）
-            "h2",
-            "div[role='main'] h2",
-            // 好友列表区域的 span
-            "div[role='main'] span",
-            // 侧边栏好友链接
-            "a[href*='/friends/'] span",
-        ];
-
-        for selector in &selectors {
+        for selector in &CONFIG.selectors.friends_count {
             // 获取所有匹配元素的文本
             if let Ok(texts) = adapter.get_all_text(selector).await {
                 info!(

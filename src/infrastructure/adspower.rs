@@ -16,12 +16,11 @@ fn get_api_url() -> String {
     env::var("ADSPOWER_API_URL").unwrap_or_else(|_| "http://127.0.0.1:50325".to_string())
 }
 
-fn get_api_key() -> Option<String> {
+fn get_api_key() -> Result<String> {
     // 优先读取 ADSPOWER_API_KEY，如果没有则尝试读取 ADSPOWER_TOKEN
     env::var("ADSPOWER_API_KEY")
         .or_else(|_| env::var("ADSPOWER_TOKEN"))
-        .ok()
-        .filter(|s| !s.is_empty())
+        .context("Missing environment variable: ADSPOWER_API_KEY or ADSPOWER_TOKEN")
 }
 
 #[derive(Debug, Deserialize)]
@@ -103,15 +102,19 @@ impl AdsPowerClient {
         // 尝试从 get_api_key 获取 key，但无论是否配置都强制设置 api-key 头
         // 如果未配置，则设置为空字符串或默认值，具体取决于 API 行为
         // 根据用户反馈，必须设置 api-key 头，即使可能为空
-        if let Some(key) = get_api_key() {
-            // 某些版本使用 api-key
-            request_builder = request_builder.header("api-key", &key);
-            // 某些版本使用 Authorization Bearer
-            request_builder = request_builder.header("Authorization", format!("Bearer {}", key));
-        } else {
-            // 如果环境变量未设置，但后端强制要求 api-key，尝试设置为空字符串
-            // 或者检查是否之前读取逻辑有问题
-            warn!("ADSPOWER_API_KEY is not set, but sending request anyway.");
+        match get_api_key() {
+            Ok(key) => {
+                // 某些版本使用 api-key
+                request_builder = request_builder.header("api-key", &key);
+                // 某些版本使用 Authorization Bearer
+                request_builder =
+                    request_builder.header("Authorization", format!("Bearer {}", key));
+            }
+            Err(e) => {
+                // 如果环境变量未设置，但后端强制要求 api-key，尝试设置为空字符串
+                // 或者检查是否之前读取逻辑有问题
+                warn!("Failed to get API key: {}, but sending request anyway.", e);
+            }
         }
 
         if method == "POST" {
@@ -161,13 +164,17 @@ impl AdsPowerClient {
 
         let mut request_builder = self.client.get(&url).query(query);
 
-        if let Some(key) = get_api_key() {
-            // 某些版本使用 api-key
-            request_builder = request_builder.header("api-key", &key);
-            // 某些版本使用 Authorization Bearer
-            request_builder = request_builder.header("Authorization", format!("Bearer {}", key));
-        } else {
-            warn!("ADSPOWER_API_KEY is not set, but sending request anyway.");
+        match get_api_key() {
+            Ok(key) => {
+                // 某些版本使用 api-key
+                request_builder = request_builder.header("api-key", &key);
+                // 某些版本使用 Authorization Bearer
+                request_builder =
+                    request_builder.header("Authorization", format!("Bearer {}", key));
+            }
+            Err(e) => {
+                warn!("Failed to get API key: {}, but sending request anyway.", e);
+            }
         }
 
         let response = request_builder
@@ -300,7 +307,7 @@ impl AdsPowerClient {
         use std::time::{SystemTime, UNIX_EPOCH};
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .subsec_nanos();
 
         // 根据文档：https://localapi-doc-zh.adspower.net/docs/BgoAbq

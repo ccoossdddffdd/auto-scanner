@@ -96,7 +96,16 @@ impl FileProcessingHandler {
     /// 处理传入的文件
     async fn handle_incoming_file(&self, csv_path: PathBuf) {
         if !csv_path.exists() {
-            let mut processing = self.context.processing_files.lock().unwrap();
+            let mut processing = match self.context.processing_files.lock() {
+                Ok(guard) => guard,
+                Err(poisoned) => {
+                    error!(
+                        "Mutex poisoned while checking file existence: {:?}",
+                        poisoned
+                    );
+                    poisoned.into_inner()
+                }
+            };
             processing.remove(&csv_path);
             return;
         }
@@ -121,7 +130,13 @@ impl FileProcessingHandler {
         .await;
 
         {
-            let mut processing = self.context.processing_files.lock().unwrap();
+            let mut processing = match self.context.processing_files.lock() {
+                Ok(guard) => guard,
+                Err(poisoned) => {
+                    error!("Mutex poisoned after processing file: {:?}", poisoned);
+                    poisoned.into_inner()
+                }
+            };
             processing.remove(&csv_path);
         }
 
@@ -182,10 +197,22 @@ fn create_file_watcher(
                     info!("Received file event: {:?}", event.kind);
                     for path in event.paths {
                         if is_supported_file(&path) {
-                            let mut processing = processing_files.lock().unwrap();
+                            let mut processing = match processing_files.lock() {
+                                Ok(guard) => guard,
+                                Err(poisoned) => {
+                                    error!("Mutex poisoned in file watcher: {:?}", poisoned);
+                                    poisoned.into_inner()
+                                }
+                            };
                             if processing.insert(path.clone()) {
                                 info!("Detected new file: {:?}", path);
-                                let _ = tx.try_send(path);
+                                if let Err(e) = tx.blocking_send(path) {
+                                    error!("Failed to send file path to processor: {}", e);
+                                    // If we can't send, we should remove it from processing set
+                                    // so it can be picked up again later
+                                    // Note: we need to re-acquire the lock or handle this better, 
+                                    // but since we are in the watcher callback, simple error logging is safer than complex recovery.
+                                }
                             }
                         }
                     }
@@ -321,7 +348,13 @@ pub async fn run(config: MasterConfig) -> Result<()> {
         let path = entry.path();
         if is_supported_file(&path) {
             let should_process = {
-                let mut processing = context.processing_files.lock().unwrap();
+                let mut processing = match context.processing_files.lock() {
+                    Ok(guard) => guard,
+                    Err(poisoned) => {
+                        error!("Mutex poisoned during initial scan: {:?}", poisoned);
+                        poisoned.into_inner()
+                    }
+                };
                 processing.insert(path.clone())
             };
             if should_process {

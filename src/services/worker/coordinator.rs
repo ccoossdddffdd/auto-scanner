@@ -39,16 +39,34 @@ impl WorkerCoordinator {
             account.username, thread_index
         );
 
-        let session = self
-            .prepare_adspower_session(thread_index, &account.username)
-            .await;
+        let mut session = None;
 
-        let remote_url = session
-            .as_ref()
-            .map(|s| s.ws_url.as_str())
-            .unwrap_or(&self.remote_url);
+        // AdsPower Mode: If session preparation fails, we MUST fail the task.
+        // Fallback to default remote_url is dangerous if AdsPower was explicitly requested.
+        let remote_url = if self.adspower.is_some() {
+            match self
+                .prepare_adspower_session(thread_index, &account.username)
+                .await
+            {
+                Some(s) => {
+                    let url = s.ws_url.clone();
+                    session = Some(s);
+                    url
+                }
+                None => {
+                    error!(
+                        "AdsPower session preparation failed for {}, aborting worker",
+                        account.username
+                    );
+                    self.cleanup_session(None, thread_index).await;
+                    return (index, None);
+                }
+            }
+        } else {
+            self.remote_url.clone()
+        };
 
-        let cmd = self.build_worker_command(&account.username, &account.password, remote_url);
+        let cmd = self.build_worker_command(&account.username, &account.password, &remote_url);
         let result = self.execute_worker(cmd, &account.username).await;
 
         self.cleanup_session(session, thread_index).await;
@@ -119,10 +137,18 @@ impl WorkerCoordinator {
 
     /// 执行 Worker 进程
     async fn execute_worker(&self, mut cmd: Command, username: &str) -> Result<WorkerResult> {
-        let output = cmd
-            .output()
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to run worker: {}", e))?;
+        // Set a timeout for the worker process to prevent hanging indefinitely
+        // Default to 5 minutes (300 seconds) which should be enough for a login attempt
+        let timeout_duration = std::time::Duration::from_secs(300);
+
+        let output = match tokio::time::timeout(timeout_duration, cmd.output()).await {
+            Ok(Ok(output)) => output,
+            Ok(Err(e)) => anyhow::bail!("Failed to run worker process: {}", e),
+            Err(_) => anyhow::bail!(
+                "Worker timed out after {} seconds",
+                timeout_duration.as_secs()
+            ),
+        };
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         for line in stdout.lines() {

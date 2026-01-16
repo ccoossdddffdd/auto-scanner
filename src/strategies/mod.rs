@@ -4,7 +4,6 @@ use anyhow::Result;
 use async_trait::async_trait;
 
 pub mod facebook;
-pub mod facebook_mobile;
 
 #[async_trait]
 pub trait LoginStrategy: Send + Sync {
