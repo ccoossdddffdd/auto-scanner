@@ -17,6 +17,13 @@ impl InputWatcher {
                     Ok(event) => {
                         if let EventKind::Create(_) | EventKind::Modify(_) = event.kind {
                             for path in event.paths {
+                                // 忽略隐藏文件或临时文件
+                                if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+                                    if file_name.starts_with('.') {
+                                        continue;
+                                    }
+                                }
+                                
                                 if FilePolicyService::is_supported_file(&path) {
                                     // Use blocking_send because this is a sync callback
                                     if let Err(e) = tx.blocking_send(path.clone()) {

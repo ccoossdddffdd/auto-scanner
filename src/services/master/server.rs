@@ -299,6 +299,12 @@ impl MasterServer {
                     break;
                 }
                 Some(path) = rx.recv() => {
+                    // Check if file still exists before processing
+                    // This prevents processing files that were just moved/deleted
+                    if !path.exists() {
+                         continue;
+                    }
+
                     if context.state.scheduler.try_schedule(path.clone()) {
                         handler.handle_incoming_file(path).await;
                     }
