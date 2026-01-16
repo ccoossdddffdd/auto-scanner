@@ -21,12 +21,18 @@ impl JobScheduler {
     }
 
     pub fn try_schedule(&self, path: PathBuf) -> bool {
-        let mut processing = self.processing_files.lock().unwrap_or_else(|e| e.into_inner());
+        let mut processing = self
+            .processing_files
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         processing.insert(path)
     }
 
     pub fn mark_completed(&self, path: &PathBuf) {
-        let mut processing = self.processing_files.lock().unwrap_or_else(|e| e.into_inner());
+        let mut processing = self
+            .processing_files
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         processing.remove(path);
     }
 }

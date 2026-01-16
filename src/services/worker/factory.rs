@@ -24,4 +24,10 @@ mod tests {
         let strategy = StrategyFactory::create(WorkerStrategy::FacebookLogin);
         assert!(strategy.is_ok());
     }
+
+    #[test]
+    fn test_create_outlook_register_strategy() {
+        let strategy = StrategyFactory::create(WorkerStrategy::OutlookRegister);
+        assert!(strategy.is_ok());
+    }
 }

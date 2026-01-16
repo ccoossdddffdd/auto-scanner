@@ -3,8 +3,8 @@ pub mod config;
 pub mod imap_service;
 pub mod monitor;
 pub mod notification;
-pub mod processor;
 pub mod parser;
+pub mod processor;
 pub mod sender;
 pub mod tracker;
 

@@ -35,10 +35,7 @@ impl FilePolicyService {
             .and_then(|s| s.to_str())
             .context("无效的文件名")?;
 
-        let extension = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("csv");
+        let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("csv");
 
         let new_name = format!("{}.done-{}.{}", file_name, now, extension);
         Ok(doned_dir.join(new_name))

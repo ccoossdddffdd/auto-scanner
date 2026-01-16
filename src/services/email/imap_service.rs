@@ -1,6 +1,6 @@
 use anyhow::Result;
-use async_trait::async_trait;
 use async_imap::types::Mailbox;
+use async_trait::async_trait;
 
 #[async_trait]
 pub trait ImapService: Send + Sync {

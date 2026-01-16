@@ -201,7 +201,7 @@ impl WorkerOrchestrator for WorkerCoordinator {
         // But self is &WorkerCoordinator.
         // The pattern used before was Arc<WorkerCoordinator>.
         // Here we can just clone self because it implements Clone.
-        
+
         let mut handles = Vec::new();
         for (index, account) in accounts.iter().enumerate() {
             let coord = self.clone();

@@ -1,5 +1,7 @@
 use std::str::FromStr;
 
+use std::fmt;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkerStrategy {
     FacebookLogin,
@@ -18,11 +20,11 @@ impl FromStr for WorkerStrategy {
     }
 }
 
-impl ToString for WorkerStrategy {
-    fn to_string(&self) -> String {
+impl fmt::Display for WorkerStrategy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            WorkerStrategy::FacebookLogin => "facebook_login".to_string(),
-            WorkerStrategy::OutlookRegister => "outlook_register".to_string(),
+            WorkerStrategy::FacebookLogin => write!(f, "facebook_login"),
+            WorkerStrategy::OutlookRegister => write!(f, "outlook_register"),
         }
     }
 }

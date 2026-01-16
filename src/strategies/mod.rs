@@ -8,9 +8,5 @@ pub mod outlook_register;
 
 #[async_trait]
 pub trait BaseStrategy: Send + Sync {
-    async fn run(
-        &self,
-        adapter: &dyn BrowserAdapter,
-        account: &Account,
-    ) -> Result<WorkerResult>;
+    async fn run(&self, adapter: &dyn BrowserAdapter, account: &Account) -> Result<WorkerResult>;
 }

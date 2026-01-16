@@ -9,7 +9,7 @@ impl FingerprintGenerator {
             .unwrap_or_default()
             .subsec_nanos();
 
-        if nanos % 2 == 0 {
+        if nanos.is_multiple_of(2) {
             "Windows"
         } else {
             "Mac"

@@ -231,9 +231,7 @@ impl Default for Urls {
             base: "https://www.facebook.com".to_string(),
             friends: "https://www.facebook.com/me/friends".to_string(),
             mobile_check: "m.facebook.com".to_string(),
-            checkpoints: vec![
-                "828281030927956".to_string(),
-            ],
+            checkpoints: vec!["828281030927956".to_string()],
         }
     }
 }

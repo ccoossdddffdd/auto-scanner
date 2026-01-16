@@ -104,14 +104,14 @@ impl EmailMonitor {
         }
 
         info!("Found {} unread emails", uids.len());
-        
+
         // 我们不能在 process_email_batch 中持有锁，因为那会导致长时间的锁定
         // 但是 ImapService 本身是有状态的（session），如果我们在循环中每次都 lock，
         // 那么多个任务可能会交错使用同一个 session（虽然 ImapClient 是同步的，这里用 async mutex 保证互斥）
         // 实际上 check_and_process_emails 是被 start_monitoring 循环调用的，而 start_monitoring 本身是单任务的。
         // 除非有其他地方也调用 check_and_process_emails（目前没有）。
         // 所以在这里持有锁是安全的。
-        
+
         for uid in uids {
             if let Err(e) = self.fetch_and_process_email(uid, &mut **imap_service).await {
                 error!("Failed to process email UID {}: {}", uid, e);
@@ -127,14 +127,19 @@ impl EmailMonitor {
     }
 
     /// 获取并处理单个邮件
-    async fn fetch_and_process_email(&self, uid: u32, imap_service: &mut dyn ImapService) -> Result<()> {
+    async fn fetch_and_process_email(
+        &self,
+        uid: u32,
+        imap_service: &mut dyn ImapService,
+    ) -> Result<()> {
         let raw_data = imap_service.fetch_email(uid).await?;
 
         let raw_bytes =
             raw_data.ok_or_else(|| anyhow::anyhow!("No data returned for email UID {}", uid))?;
 
         let parsed = self.processor.parse_email(&raw_bytes)?;
-        self.process_email_workflow(uid, &parsed, imap_service).await?;
+        self.process_email_workflow(uid, &parsed, imap_service)
+            .await?;
 
         Ok(())
     }
@@ -154,7 +159,8 @@ impl EmailMonitor {
         info!("Processing email from: {}, subject: {}", from, subject);
 
         // 处理附件
-        self.process_attachments(uid, parsed, &from, imap_service).await?;
+        self.process_attachments(uid, parsed, &from, imap_service)
+            .await?;
 
         Ok(())
     }
@@ -180,9 +186,7 @@ impl EmailMonitor {
 
         // 下载所有有效附件
         for attachment in &attachments {
-            let _ = self
-                .processor
-                .save_attachment(uid, attachment, from)?;
+            let _ = self.processor.save_attachment(uid, attachment, from)?;
         }
 
         // 标记邮件已读并移动到"已处理"文件夹
@@ -211,7 +215,11 @@ impl EmailMonitor {
     }
 
     /// 标记并移动邮件
-    async fn mark_and_move_email(&self, uid: u32, imap_service: &mut dyn ImapService) -> Result<()> {
+    async fn mark_and_move_email(
+        &self,
+        uid: u32,
+        imap_service: &mut dyn ImapService,
+    ) -> Result<()> {
         info!("Marking email {} as read and moving to processed", uid);
 
         // 标记已读

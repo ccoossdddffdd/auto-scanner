@@ -72,20 +72,35 @@ impl ImapService for ImapClient {
     }
 
     async fn select_mailbox(&mut self, mailbox: &str) -> Result<Mailbox> {
-        let session = self.session.as_mut().context("IMAP session not connected")?;
-        session.select(mailbox).await.context("Failed to select mailbox")
+        let session = self
+            .session
+            .as_mut()
+            .context("IMAP session not connected")?;
+        session
+            .select(mailbox)
+            .await
+            .context("Failed to select mailbox")
     }
 
     async fn search_unseen(&mut self) -> Result<Vec<u32>> {
-        let session = self.session.as_mut().context("IMAP session not connected")?;
-        let result = session.search("UNSEEN").await.context("Failed to search unseen")?;
+        let session = self
+            .session
+            .as_mut()
+            .context("IMAP session not connected")?;
+        let result = session
+            .search("UNSEEN")
+            .await
+            .context("Failed to search unseen")?;
         Ok(result.into_iter().collect())
     }
 
     async fn fetch_email(&mut self, uid: u32) -> Result<Option<Vec<u8>>> {
-        let session = self.session.as_mut().context("IMAP session not connected")?;
+        let session = self
+            .session
+            .as_mut()
+            .context("IMAP session not connected")?;
         let mut fetch_stream = session.fetch(uid.to_string(), "RFC822").await?;
-        
+
         if let Some(msg) = fetch_stream.next().await {
             let msg = msg?;
             return Ok(msg.body().map(|b| b.to_vec()));
@@ -94,7 +109,10 @@ impl ImapService for ImapClient {
     }
 
     async fn mark_as_read(&mut self, uid: u32) -> Result<()> {
-        let session = self.session.as_mut().context("IMAP session not connected")?;
+        let session = self
+            .session
+            .as_mut()
+            .context("IMAP session not connected")?;
         let mut stream = session.store(uid.to_string(), "+FLAGS (\\Seen)").await?;
         while let Some(res) = stream.next().await {
             res?;
@@ -103,7 +121,10 @@ impl ImapService for ImapClient {
     }
 
     async fn move_email(&mut self, uid: u32, dest: &str) -> Result<()> {
-        let session = self.session.as_mut().context("IMAP session not connected")?;
+        let session = self
+            .session
+            .as_mut()
+            .context("IMAP session not connected")?;
         session.mv(uid.to_string(), dest).await?;
         Ok(())
     }
