@@ -1,5 +1,6 @@
 use anyhow::Result;
 use auto_scanner::core::cli::{Cli, Commands};
+use auto_scanner::core::config::AppConfig;
 use auto_scanner::infrastructure::daemon::start_daemon;
 use auto_scanner::infrastructure::logging::init_logging;
 use auto_scanner::services::{master, worker};
@@ -27,7 +28,7 @@ fn main() -> Result<()> {
             }
 
             // 创建运行时并运行主进程
-            let config = master::MasterConfig {
+            let master_config = master::MasterConfig {
                 backend,
                 remote_url,
                 thread_count,
@@ -39,8 +40,13 @@ fn main() -> Result<()> {
                 email_poll_interval,
                 exe_path: None,
             };
+
+            // 初始化日志（需要先于配置加载，以便记录配置加载过程中的警告）
+            init_logging("auto-scanner", master_config.daemon)?;
+
+            let app_config = AppConfig::new(master_config)?;
             let rt = tokio::runtime::Runtime::new()?;
-            rt.block_on(async { master::run(config).await })
+            rt.block_on(async { master::run(app_config).await })
         }
         Commands::Worker {
             username,

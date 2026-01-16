@@ -1,5 +1,5 @@
 use crate::core::models::{Account, WorkerResult};
-use crate::infrastructure::adspower::AdsPowerClient;
+use crate::infrastructure::browser_manager::BrowserEnvironmentManager;
 use anyhow::Result;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -16,7 +16,7 @@ struct AdsPowerSession {
 pub struct WorkerCoordinator {
     pub permit_rx: async_channel::Receiver<usize>,
     pub permit_tx: async_channel::Sender<usize>,
-    pub adspower: Option<Arc<AdsPowerClient>>,
+    pub adspower: Option<Arc<dyn BrowserEnvironmentManager>>,
     pub exe_path: PathBuf,
     pub backend: String,
     pub remote_url: String,
@@ -94,7 +94,10 @@ impl WorkerCoordinator {
             None
         };
 
-        let profile_id = match client.ensure_profile_for_thread(thread_index, profile_config.as_ref()).await {
+        let profile_id = match client
+            .ensure_profile_for_thread(thread_index, profile_config.as_ref())
+            .await
+        {
             Ok(id) => id,
             Err(e) => {
                 error!("确保线程 {} 的 AdsPower 配置文件失败: {}", thread_index, e);
@@ -147,8 +150,12 @@ impl WorkerCoordinator {
         };
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        for line in stdout.lines() {
-            if let Some(json_str) = line.strip_prefix("RESULT_JSON:") {
+        // Parse the output looking for the framed result: <<WORKER_RESULT>>{json}<<WORKER_RESULT>>
+        // This regex-like search ensures we ignore any other logs printed to stdout
+        if let Some(start_idx) = stdout.find("<<WORKER_RESULT>>") {
+            let content_start = start_idx + "<<WORKER_RESULT>>".len();
+            if let Some(end_idx) = stdout[content_start..].find("<<WORKER_RESULT>>") {
+                let json_str = &stdout[content_start..content_start + end_idx];
                 if let Ok(result) = serde_json::from_str::<WorkerResult>(json_str) {
                     return Ok(result);
                 }

@@ -1,4 +1,6 @@
 use crate::core::error::{AppError, AppResult};
+use crate::infrastructure::browser_manager::BrowserEnvironmentManager;
+use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -442,5 +444,40 @@ impl AdsPowerClient {
 
         info!("已删除 AdsPower 配置文件: {}", user_id);
         Ok(())
+    }
+}
+
+#[async_trait]
+impl BrowserEnvironmentManager for AdsPowerClient {
+    async fn check_connectivity(&self) -> AppResult<()> {
+        self.check_connectivity().await
+    }
+
+    async fn ensure_profiles_for_workers(
+        &self,
+        worker_count: usize,
+        config: Option<&ProfileConfig>,
+    ) -> AppResult<()> {
+        self.ensure_profiles_for_workers(worker_count, config).await
+    }
+
+    async fn ensure_profile_for_thread(
+        &self,
+        thread_index: usize,
+        config: Option<&ProfileConfig>,
+    ) -> AppResult<String> {
+        self.ensure_profile_for_thread(thread_index, config).await
+    }
+
+    async fn start_browser(&self, user_id: &str) -> AppResult<String> {
+        self.start_browser(user_id).await
+    }
+
+    async fn stop_browser(&self, user_id: &str) -> AppResult<()> {
+        self.stop_browser(user_id).await
+    }
+
+    async fn delete_profile(&self, user_id: &str) -> AppResult<()> {
+        self.delete_profile(user_id).await
     }
 }

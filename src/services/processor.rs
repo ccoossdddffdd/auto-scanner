@@ -1,5 +1,5 @@
 use crate::core::models::{Account, WorkerResult};
-use crate::infrastructure::adspower::AdsPowerClient;
+use crate::infrastructure::browser_manager::BrowserEnvironmentManager;
 use crate::services::email::monitor::EmailMonitor;
 use crate::services::file::get_account_source;
 use crate::services::file::operation::{prepare_input_file, write_results_and_rename};
@@ -14,7 +14,7 @@ use tracing::{error, info, warn};
 pub struct BrowserConfig {
     pub backend: String,
     pub remote_url: String,
-    pub adspower: Option<Arc<AdsPowerClient>>,
+    pub adspower: Option<Arc<dyn BrowserEnvironmentManager>>,
 }
 
 /// Worker 配置

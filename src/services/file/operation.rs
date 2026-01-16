@@ -1,8 +1,8 @@
 use crate::core::models::WorkerResult;
 use crate::services::email::monitor::EmailMonitor;
 use crate::services::file::get_account_source;
+use crate::services::file_policy::FilePolicyService;
 use anyhow::{Context, Result};
-use chrono::Local;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -30,19 +30,11 @@ pub async fn convert_txt_to_csv(path: &Path) -> Result<PathBuf> {
 }
 
 pub fn rename_processed_file(path: &Path, doned_dir: &Path) -> Result<PathBuf> {
-    let now = Local::now().format("%Y%m%d-%H%M%S");
-    let file_name = path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .context("无效的文件名")?;
-
-    // We use the provided doned_dir instead of assuming it's in the parent directory
     if !doned_dir.exists() {
         fs::create_dir_all(doned_dir).context("创建完成目录失败")?;
     }
 
-    let new_name = format!("{}.done-{}.csv", file_name, now);
-    let new_path = doned_dir.join(new_name);
+    let new_path = FilePolicyService::generate_processed_path(path, doned_dir)?;
 
     fs::rename(path, &new_path).context("移动处理后的文件到完成目录失败")?;
     info!("已将处理后的文件移动到 {:?}", new_path);

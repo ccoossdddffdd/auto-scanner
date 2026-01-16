@@ -36,7 +36,10 @@ pub async fn run(
                 message: format!("浏览器初始化失败: {}", e),
                 data: None,
             };
-            println!("RESULT_JSON:{}", serde_json::to_string(&result)?);
+            println!(
+                "<<WORKER_RESULT>>{}<<WORKER_RESULT>>",
+                serde_json::to_string(&result)?
+            );
             return Err(e);
         }
     };
@@ -61,7 +64,10 @@ pub async fn run(
         }
     };
 
-    println!("RESULT_JSON:{}", serde_json::to_string(&result)?);
+    println!(
+        "<<WORKER_RESULT>>{}<<WORKER_RESULT>>",
+        serde_json::to_string(&result)?
+    );
     info!("{} Worker 执行完成", username);
     Ok(())
 }
