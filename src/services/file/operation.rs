@@ -89,31 +89,55 @@ pub async fn write_results_and_rename(
 
     let mut new_headers = headers.clone();
     new_headers.push("状态".to_string());
-    new_headers.push("验证码".to_string());
-    new_headers.push("2FA".to_string());
-    new_headers.push("好友数量".to_string());
     new_headers.push("信息".to_string());
+
+    // Collect all dynamic keys from results
+    let mut dynamic_keys = std::collections::BTreeSet::new();
+    for (_, worker_res_opt) in &results {
+        if let Some(res) = worker_res_opt {
+            if let Some(data) = &res.data {
+                for key in data.keys() {
+                    dynamic_keys.insert(key.clone());
+                }
+            }
+        }
+    }
+
+    // Add dynamic keys to headers
+    for key in &dynamic_keys {
+        new_headers.push(key.clone());
+    }
 
     let mut new_records = Vec::new();
     for (idx, worker_res_opt) in results {
         if let Some(record) = records.get(idx) {
             let mut new_record = record.clone();
             if let Some(res) = worker_res_opt {
-                new_record.push(res.status);
-                new_record.push(res.captcha);
-                new_record.push(res.two_fa);
-                new_record.push(
-                    res.friends_count
-                        .map(|c| c.to_string())
-                        .unwrap_or_else(|| "未知".to_string()),
-                );
-                new_record.push(res.message);
+                new_record.push(res.status.clone());
+                new_record.push(res.message.clone());
+                
+                // Add values for dynamic keys
+                for key in &dynamic_keys {
+                    let value = if let Some(data) = &res.data {
+                        data.get(key).map(|v| match v {
+                            serde_json::Value::String(s) => s.clone(),
+                            serde_json::Value::Number(n) => n.to_string(),
+                            serde_json::Value::Bool(b) => b.to_string(),
+                            serde_json::Value::Null => "无".to_string(),
+                            _ => v.to_string(),
+                        }).unwrap_or_else(|| "未知".to_string())
+                    } else {
+                        "未知".to_string()
+                    };
+                    new_record.push(value);
+                }
             } else {
                 new_record.push("系统错误".to_string());
-                new_record.push("未知".to_string());
-                new_record.push("未知".to_string());
-                new_record.push("未知".to_string());
                 new_record.push("Worker 执行失败".to_string());
+                // Fill dynamic keys with "未知"
+                for _ in &dynamic_keys {
+                    new_record.push("未知".to_string());
+                }
             }
             new_records.push(new_record);
         }

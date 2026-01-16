@@ -13,10 +13,9 @@ pub struct Account {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WorkerResult {
     pub status: String,
-    pub captcha: String,
-    pub two_fa: String,
     pub message: String,
-    pub friends_count: Option<u32>,
+    #[serde(default)]
+    pub data: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 impl Account {

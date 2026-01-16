@@ -41,10 +41,8 @@ pub async fn run(
             error!("Browser initialization failed for {}: {}", username, e);
             let result = WorkerResult {
                 status: "登录失败".to_string(),
-                captcha: "未知".to_string(),
-                two_fa: "未知".to_string(),
                 message: format!("浏览器初始化失败: {}", e),
-                friends_count: None,
+                data: None,
             };
             println!("RESULT_JSON:{}", serde_json::to_string(&result)?);
             return Err(e);
@@ -58,7 +56,7 @@ pub async fn run(
         }
     };
 
-    let result = match strategy.login(adapter.as_ref(), &account).await {
+    let result = match strategy.run(adapter.as_ref(), &account).await {
         Ok(outcome) => {
             info!(
                 "Login process finished for {}. Success: {}",
@@ -70,10 +68,8 @@ pub async fn run(
             error!("Login failed for {}: {}", username, e);
             WorkerResult {
                 status: "登录失败".to_string(),
-                captcha: "未知".to_string(),
-                two_fa: "未知".to_string(),
                 message: format!("登录错误: {}", e),
-                friends_count: None,
+                data: None,
             }
         }
     };

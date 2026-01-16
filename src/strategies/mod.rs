@@ -7,5 +7,9 @@ pub mod facebook;
 
 #[async_trait]
 pub trait LoginStrategy: Send + Sync {
-    async fn login(&self, adapter: &dyn BrowserAdapter, account: &Account) -> Result<WorkerResult>;
+    async fn run(
+        &self,
+        adapter: &dyn BrowserAdapter,
+        account: &Account,
+    ) -> Result<WorkerResult>;
 }
