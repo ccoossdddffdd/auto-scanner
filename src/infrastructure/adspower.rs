@@ -1,4 +1,11 @@
+pub mod fingerprint;
+pub mod types;
+
 use crate::core::error::{AppError, AppResult};
+use crate::infrastructure::adspower::fingerprint::FingerprintGenerator;
+use crate::infrastructure::adspower::types::{
+    CreateProfileRequest, FingerprintConfig, RandomUaConfig, UserProxyConfig,
+};
 use crate::infrastructure::browser_manager::BrowserEnvironmentManager;
 use async_trait::async_trait;
 use reqwest::Client;
@@ -322,23 +329,7 @@ impl AdsPowerClient {
         username: &str,
         profile_config: Option<&ProfileConfig>,
     ) -> AppResult<String> {
-        // 随机选择操作系统：Windows 或 Mac
-        // 使用时间戳的纳秒部分来决定（避免跨 await 的 Send 问题）
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .subsec_nanos();
-
-        // 根据文档：https://localapi-doc-zh.adspower.net/docs/BgoAbq
-        // ua_system_version 支持的值：
-        // - Windows: Windows 7, Windows 8, Windows 10, Windows 11
-        // - Mac: Mac OS X 10, Mac OS X 11, Mac OS X 12, Mac OS X 13
-        let ua_system_version = if nanos.is_multiple_of(2) {
-            "Windows" // Windows 操作系统（随机版本）
-        } else {
-            "Mac" // Mac 操作系统（随机版本）
-        };
+        let ua_system_version = FingerprintGenerator::generate_random_system();
 
         info!(
             "正在创建配置文件 {}，UA 系统: {}",
@@ -348,44 +339,29 @@ impl AdsPowerClient {
         let default_config = ProfileConfig::default();
         let config = profile_config.unwrap_or(&default_config);
 
-        let mut body = json!({
-            "name": username,
-            "group_id": config.group_id,
-            "domain_name": config.domain_name,
-            "open_urls": config.open_urls,
-            "fingerprint_config": {
-                "random_ua": {
-                    "ua_browser": ["chrome"],
-                    "ua_system_version": [ua_system_version]
-                }
-            }
-        });
-
-        // ADSPOWER_PROXYID is mandatory if not provided in config (which it isn't currently)
-        // But we moved it to AdsPowerConfig
         let proxyid = self
             .config
             .proxy_id
-            .as_ref()
+            .clone()
             .ok_or_else(|| AppError::Config("需要 ADSPOWER_PROXYID 配置".to_string()))?;
 
-        if let Some(obj) = body.as_object_mut() {
-            obj.insert(
-                "user_proxy_config".to_string(),
-                json!({
-                    "proxy_soft": "other",
-                    "proxy_type": "noproxy",
-                }),
-            );
-            // Although we set noproxy above as a fallback structure,
-            // if we are using a specific proxyid (saved proxy), we should check API docs.
-            // Usually 'proxyid' at top level is enough if it refers to a saved proxy.
-            // Let's stick to what we added but make it mandatory.
-            obj.insert("proxyid".to_string(), json!(proxyid));
-        }
+        let request = CreateProfileRequest {
+            name: username.to_string(),
+            group_id: config.group_id.clone(),
+            domain_name: config.domain_name.clone(),
+            open_urls: config.open_urls.clone(),
+            fingerprint_config: FingerprintConfig {
+                random_ua: RandomUaConfig {
+                    ua_browser: vec!["chrome".to_string()],
+                    ua_system_version: vec![ua_system_version.to_string()],
+                },
+            },
+            user_proxy_config: UserProxyConfig::default(),
+            proxyid: Some(proxyid),
+        };
 
         let resp: CreateProfileResponse = self
-            .call_api("POST", "/api/v1/user/create", Some(body))
+            .call_api("POST", "/api/v1/user/create", Some(request))
             .await?;
 
         Ok(resp.id)

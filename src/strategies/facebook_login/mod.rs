@@ -5,10 +5,12 @@ use crate::infrastructure::browser::BrowserAdapter;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use tracing::info;
-
 pub mod constants;
+pub mod detector;
+pub mod result_builder;
 use constants::FacebookConfig;
-
+use detector::{LoginStatus, LoginStatusDetector};
+use result_builder::FacebookResultBuilder;
 pub fn get_profile_config() -> ProfileConfig {
     ProfileConfig {
         group_id: "0".to_string(),
@@ -38,11 +40,7 @@ impl FacebookLoginStrategy {
         Self { config }
     }
 
-    async fn perform_login(
-        &self,
-        adapter: &dyn BrowserAdapter,
-        account: &Account,
-    ) -> Result<()> {
+    async fn perform_login(&self, adapter: &dyn BrowserAdapter, account: &Account) -> Result<()> {
         info!("Navigating to Facebook...");
         adapter.navigate(&self.config.urls.base).await?;
 
@@ -149,259 +147,12 @@ impl BaseStrategy for FacebookLoginStrategy {
         let detector = LoginStatusDetector::new(&self.config);
         let status = detector.detect(adapter).await;
 
-        let mut data = serde_json::Map::new();
-        data.insert(
-            "验证码".to_string(),
-            serde_json::Value::String("不需要".to_string()),
-        );
-        data.insert(
-            "2FA".to_string(),
-            serde_json::Value::String("不需要".to_string()),
-        );
-
-        let mut result = WorkerResult {
-            status: "登录失败".to_string(),
-            message: "未知失败".to_string(),
-            data: Some(data),
+        let friends_count = if status == LoginStatus::Success {
+            self.get_friends_count(adapter).await.ok()
+        } else {
+            None
         };
 
-        match status {
-            LoginStatus::Success => {
-                info!("Login detected as successful");
-                result.status = "登录成功".to_string();
-                result.message = "成功".to_string();
-
-                if let Ok(count) = self.get_friends_count(adapter).await {
-                    if let Some(data) = &mut result.data {
-                        data.insert(
-                            "好友数量".to_string(),
-                            serde_json::Value::Number(serde_json::Number::from(count)),
-                        );
-                    }
-                    info!("Friends count: {}", count);
-                }
-            }
-            LoginStatus::Captcha => {
-                info!("Captcha detected");
-                if let Some(data) = &mut result.data {
-                    data.insert(
-                        "验证码".to_string(),
-                        serde_json::Value::String("需要".to_string()),
-                    );
-                }
-                result.message = "检测到验证码".to_string();
-            }
-            LoginStatus::TwoFactor => {
-                info!("2FA detected");
-                if let Some(data) = &mut result.data {
-                    data.insert(
-                        "2FA".to_string(),
-                        serde_json::Value::String("需要".to_string()),
-                    );
-                }
-                result.message = "检测到 2FA".to_string();
-            }
-            LoginStatus::AccountLocked => {
-                info!("Account locked detected");
-                result.status = "登录失败".to_string();
-                result.message = "账号已锁定".to_string();
-            }
-            LoginStatus::WrongPassword => {
-                info!("Wrong password detected");
-                result.status = "登录失败".to_string();
-                result.message = "密码错误".to_string();
-            }
-            LoginStatus::Failed => {}
-        }
-
-        Ok(result)
-    }
-}
-
-enum LoginStatus {
-    Success,
-    Captcha,
-    TwoFactor,
-    WrongPassword,
-    AccountLocked,
-    Failed,
-}
-
-struct LoginStatusDetector<'a> {
-    config: &'a FacebookConfig,
-}
-
-impl<'a> LoginStatusDetector<'a> {
-    fn new(config: &'a FacebookConfig) -> Self {
-        Self { config }
-    }
-
-    async fn detect(&self, adapter: &dyn BrowserAdapter) -> LoginStatus {
-        let current_url = adapter.get_current_url().await.unwrap_or_default();
-
-        if self.check_success(adapter, &current_url).await {
-            return LoginStatus::Success;
-        }
-
-        let (has_captcha, has_2fa, wrong_password, account_locked) = tokio::join!(
-            self.check_captcha(adapter, &current_url),
-            self.check_2fa(adapter, &current_url),
-            self.check_wrong_password(adapter, &current_url),
-            self.check_account_locked(adapter, &current_url),
-        );
-
-        if has_captcha {
-            LoginStatus::Captcha
-        } else if has_2fa {
-            LoginStatus::TwoFactor
-        } else if wrong_password {
-            LoginStatus::WrongPassword
-        } else if account_locked {
-            LoginStatus::AccountLocked
-        } else {
-            LoginStatus::Failed
-        }
-    }
-
-    async fn check_success(&self, adapter: &dyn BrowserAdapter, url: &str) -> bool {
-        info!("Current URL: {}", url);
-        if url.contains("/login") || url.contains("/checkpoint") {
-            return false;
-        }
-
-        let email_visible = adapter
-            .is_visible(&self.config.selectors.login_form.email)
-            .await
-            .unwrap_or(false);
-        let pass_visible = adapter
-            .is_visible(&self.config.selectors.login_form.pass)
-            .await
-            .unwrap_or(false);
-
-        if email_visible && pass_visible {
-            return false;
-        }
-
-        for selector in &self.config.selectors.indicators.profile {
-            if let Ok(visible) = adapter.is_visible(selector).await {
-                if visible {
-                    return true;
-                }
-            }
-        }
-
-        for selector in &self.config.selectors.indicators.elements {
-            if let Ok(visible) = adapter.is_visible(selector).await {
-                if visible {
-                    return true;
-                }
-            }
-        }
-
-        false
-    }
-
-    async fn check_captcha(&self, adapter: &dyn BrowserAdapter, url: &str) -> bool {
-        if url.contains("captcha")
-            || self
-                .config
-                .urls
-                .checkpoints
-                .iter()
-                .any(|id| url.contains("checkpoint") && url.contains(id))
-        {
-            return true;
-        }
-
-        for selector in &self.config.selectors.captcha {
-            if let Ok(visible) = adapter.is_visible(selector).await {
-                if visible {
-                    return true;
-                }
-            }
-        }
-
-        for selector in &self.config.selectors.error_containers {
-            if let Ok(visible) = adapter.is_visible(selector).await {
-                if visible {
-                    if let Ok(text) = adapter.get_text(selector).await {
-                        let text_lower = text.to_lowercase();
-                        for keyword in &self.config.keywords.captcha {
-                            if text_lower.contains(keyword) {
-                                return true;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        false
-    }
-
-    async fn check_2fa(&self, adapter: &dyn BrowserAdapter, url: &str) -> bool {
-        if url.contains("two_step_verification") {
-            return true;
-        }
-        adapter
-            .is_visible(&self.config.selectors.two_fa_input)
-            .await
-            .unwrap_or(false)
-    }
-
-    async fn check_wrong_password(&self, adapter: &dyn BrowserAdapter, url: &str) -> bool {
-        if url.contains("/login") && url.contains("error") {
-            info!("URL indicates login error (possibly wrong password)");
-        }
-
-        for selector in &self.config.selectors.error_containers {
-            if let Ok(visible) = adapter.is_visible(selector).await {
-                if visible {
-                    if let Ok(text) = adapter.get_text(selector).await {
-                        let text_lower = text.to_lowercase();
-                        for keyword in &self.config.keywords.wrong_password {
-                            if text_lower.contains(&keyword.to_lowercase()) {
-                                return true;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        false
-    }
-
-    async fn check_account_locked(&self, adapter: &dyn BrowserAdapter, url: &str) -> bool {
-        if url.contains("/checkpoint")
-            && !url.contains("two_step")
-            && !url.contains("2fa")
-        {
-            return true;
-        }
-
-        if url.contains("locked") || url.contains("disabled") || url.contains("suspended") {
-            return true;
-        }
-
-        for selector in &self.config.selectors.locked_indicators {
-            if adapter.is_visible(selector).await.unwrap_or(false) {
-                return true;
-            }
-        }
-
-        for selector in &self.config.selectors.error_containers {
-            if let Ok(visible) = adapter.is_visible(selector).await {
-                if visible {
-                    if let Ok(text) = adapter.get_text(selector).await {
-                        let text_lower = text.to_lowercase();
-                        for keyword in &self.config.keywords.account_locked {
-                            if text_lower.contains(keyword) {
-                                return true;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        false
+        Ok(FacebookResultBuilder::build(status, friends_count))
     }
 }

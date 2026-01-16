@@ -1,6 +1,6 @@
 use super::{BrowserAdapter, BrowserCookie, BrowserError};
 use async_trait::async_trait;
-use playwright::api::{Browser, BrowserContext, Page};
+use playwright::api::{Browser, BrowserContext, BrowserType, Page};
 use playwright::Playwright;
 use tokio::time::{timeout, Duration};
 use tracing::info;
@@ -25,10 +25,7 @@ impl PlaywrightAdapterBuilder {
 
     pub async fn build(self) -> Result<PlaywrightAdapter, BrowserError> {
         info!("正在初始化 Playwright...");
-        let playwright = Playwright::initialize().await.map_err(|e| {
-            BrowserError::ConnectionFailed(format!("初始化 Playwright 失败: {}", e))
-        })?;
-
+        let playwright = self.init_playwright().await?;
         let chromium = playwright.chromium();
 
         info!(
@@ -36,26 +33,7 @@ impl PlaywrightAdapterBuilder {
             self.remote_url, self.connect_timeout
         );
 
-        let browser = match timeout(
-            self.connect_timeout,
-            chromium
-                .connect_over_cdp_builder(&self.remote_url)
-                .connect_over_cdp(),
-        )
-        .await
-        {
-            Ok(result) => result.map_err(|e| {
-                let msg = Self::format_connection_error(&e);
-                BrowserError::ConnectionFailed(msg)
-            })?,
-            Err(_) => {
-                return Err(BrowserError::ConnectionFailed(format!(
-                    "连接到 {} 超时 ({:?})",
-                    self.remote_url, self.connect_timeout
-                )));
-            }
-        };
-
+        let browser = self.connect_cdp(&chromium).await?;
         info!("成功连接到浏览器。");
 
         let context = Self::get_or_create_context(&browser).await?;
@@ -67,6 +45,33 @@ impl PlaywrightAdapterBuilder {
             _context: context,
             page,
         })
+    }
+
+    async fn init_playwright(&self) -> Result<Playwright, BrowserError> {
+        Playwright::initialize()
+            .await
+            .map_err(|e| BrowserError::ConnectionFailed(format!("初始化 Playwright 失败: {}", e)))
+    }
+
+    async fn connect_cdp(&self, chromium: &BrowserType) -> Result<Browser, BrowserError> {
+        let result = timeout(
+            self.connect_timeout,
+            chromium
+                .connect_over_cdp_builder(&self.remote_url)
+                .connect_over_cdp(),
+        )
+        .await;
+
+        match result {
+            Ok(inner_result) => inner_result.map_err(|e| {
+                let msg = Self::format_connection_error(&e);
+                BrowserError::ConnectionFailed(msg)
+            }),
+            Err(_) => Err(BrowserError::ConnectionFailed(format!(
+                "连接到 {} 超时 ({:?})",
+                self.remote_url, self.connect_timeout
+            ))),
+        }
     }
 
     async fn get_or_create_context(browser: &Browser) -> Result<BrowserContext, BrowserError> {
@@ -165,10 +170,7 @@ impl BrowserAdapter for PlaywrightAdapter {
             .click()
             .await
             .map_err(|e| {
-                BrowserError::ElementNotFound(format!(
-                    "点击元素 {} 失败: {}",
-                    selector, e
-                ))
+                BrowserError::ElementNotFound(format!("点击元素 {} 失败: {}", selector, e))
             })?;
         Ok(())
     }
@@ -178,9 +180,7 @@ impl BrowserAdapter for PlaywrightAdapter {
             .wait_for_selector_builder(selector)
             .wait_for_selector()
             .await
-            .map_err(|e| {
-                BrowserError::Timeout(format!("等待 {} 超时: {}", selector, e))
-            })?;
+            .map_err(|e| BrowserError::Timeout(format!("等待 {} 超时: {}", selector, e)))?;
         Ok(())
     }
 
@@ -236,9 +236,7 @@ impl BrowserAdapter for PlaywrightAdapter {
     }
 
     async fn set_cookies(&self, _cookies: &[BrowserCookie]) -> Result<(), BrowserError> {
-        Err(BrowserError::Other(
-            "set_cookies 尚未完全实现".to_string(),
-        ))
+        Err(BrowserError::Other("set_cookies 尚未完全实现".to_string()))
     }
 
     async fn take_screenshot(&self, path: &str) -> Result<(), BrowserError> {

@@ -8,26 +8,34 @@
 
 # Phase 2 Refactoring
 
-- [ ] **1. Refactor EmailMonitor**
-    - [ ] Create `ImapService` trait and implementation.
-    - [ ] Extract `AttachmentHandler`.
-    - [ ] Extract `EmailProcessor`.
-    - [ ] Update `EmailMonitor` to use dependency injection.
+- [x] **1. Refactor EmailMonitor**
+- [x] **2. Decouple WorkerCoordinator Strategy**
+- [x] **3. Extract Worker Process Executor**
+- [x] **4. Purify File Operations**
+- [x] **5. PlaywrightAdapter Builder**
 
-- [ ] **2. Decouple WorkerCoordinator Strategy**
-    - [ ] Create `StrategyProfileProvider` trait.
-    - [ ] Implement provider for Facebook strategy.
-    - [ ] Inject provider into `WorkerCoordinator`.
+# Phase 3 Refactoring
 
-- [ ] **3. Extract Worker Process Executor**
-    - [ ] Create `ProcessExecutor` trait.
-    - [ ] Extract `WorkerOutputParser` struct.
-    - [ ] Refactor `WorkerCoordinator` to use executor.
+- [ ] **1. Refactor Facebook Strategy Run**
+    - [ ] Create `FacebookResultBuilder` to handle `WorkerResult` construction.
+    - [ ] Simplify `run` function to focus on flow control.
 
-- [ ] **4. Purify File Operations**
-    - [ ] Refactor `prepare_input_file` to return status instead of calling monitor.
-    - [ ] Move monitor update logic to `Master` or `Processor`.
+- [ ] **2. Abstract AdsPower Fingerprint Generation**
+    - [ ] Create `FingerprintGenerator` module.
+    - [ ] Define `CreateProfileRequest` struct with `serde`.
+    - [ ] Refactor `create_profile` in `adspower.rs`.
 
-- [ ] **5. PlaywrightAdapter Builder**
-    - [ ] Create `PlaywrightAdapterBuilder`.
-    - [ ] Simplify `PlaywrightAdapter::new`.
+- [ ] **3. Encapsulate Master Lifecycle**
+    - [ ] Create `MasterServer` struct.
+    - [ ] Implement `bootstrap`, `start`, `shutdown` methods.
+    - [ ] Refactor `run` function in `master/mod.rs`.
+
+- [ ] **4. Generalize Login Status Detection**
+    - [ ] Define `DetectionRule` struct.
+    - [ ] Implement generic `check_rule` method.
+    - [ ] Refactor `LoginStatusDetector` to use rules.
+
+- [ ] **5. Simplify Playwright Connection**
+    - [ ] Extract `connect_cdp` logic.
+    - [ ] Extract error formatting.
+    - [ ] Flatten `PlaywrightAdapterBuilder::build`.
