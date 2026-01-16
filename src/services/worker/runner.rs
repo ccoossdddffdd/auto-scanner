@@ -2,7 +2,7 @@ use crate::core::models::{Account, WorkerResult};
 use crate::infrastructure::browser::{
     mock_adapter::MockBrowserAdapter, playwright_adapter::PlaywrightAdapter, BrowserAdapter,
 };
-use crate::strategies::{facebook::FacebookLoginStrategy, LoginStrategy};
+use crate::strategies::{facebook::FacebookLoginStrategy, BaseStrategy};
 use anyhow::Result;
 use tracing::{error, info};
 
@@ -49,7 +49,7 @@ pub async fn run(
         }
     };
 
-    let strategy: Box<dyn LoginStrategy> = match strategy_name.as_str() {
+    let strategy: Box<dyn BaseStrategy> = match strategy_name.as_str() {
         "facebook" => Box::new(FacebookLoginStrategy::new()),
         _ => {
             return Err(anyhow::anyhow!("Unsupported strategy: {}", strategy_name));

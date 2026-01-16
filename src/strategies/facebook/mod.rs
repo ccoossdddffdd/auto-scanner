@@ -1,4 +1,4 @@
-use super::LoginStrategy;
+use super::BaseStrategy;
 use crate::core::models::{Account, WorkerResult};
 use crate::infrastructure::browser::BrowserAdapter;
 use anyhow::{Context, Result};
@@ -263,12 +263,8 @@ impl LoginResultDetector {
 }
 
 #[async_trait]
-impl LoginStrategy for FacebookLoginStrategy {
-    async fn run(
-        &self,
-        adapter: &dyn BrowserAdapter,
-        account: &Account,
-    ) -> Result<WorkerResult> {
+impl BaseStrategy for FacebookLoginStrategy {
+    async fn run(&self, adapter: &dyn BrowserAdapter, account: &Account) -> Result<WorkerResult> {
         info!("Navigating to Facebook...");
         adapter.navigate(&CONFIG.urls.base).await?;
 
@@ -320,11 +316,17 @@ impl LoginStrategy for FacebookLoginStrategy {
 
         // 桌面版检测逻辑（原有逻辑）
         let status = LoginResultDetector::detect_status(adapter).await;
-        
+
         let mut data = serde_json::Map::new();
-        data.insert("验证码".to_string(), serde_json::Value::String("不需要".to_string()));
-        data.insert("2FA".to_string(), serde_json::Value::String("不需要".to_string()));
-        
+        data.insert(
+            "验证码".to_string(),
+            serde_json::Value::String("不需要".to_string()),
+        );
+        data.insert(
+            "2FA".to_string(),
+            serde_json::Value::String("不需要".to_string()),
+        );
+
         let mut result = WorkerResult {
             status: "登录失败".to_string(),
             message: "未知失败".to_string(),
@@ -340,7 +342,10 @@ impl LoginStrategy for FacebookLoginStrategy {
                 // 获取好友数量
                 if let Ok(count) = self.get_friends_count(adapter).await {
                     if let Some(data) = &mut result.data {
-                        data.insert("好友数量".to_string(), serde_json::Value::Number(serde_json::Number::from(count)));
+                        data.insert(
+                            "好友数量".to_string(),
+                            serde_json::Value::Number(serde_json::Number::from(count)),
+                        );
                     }
                     info!("Friends count: {}", count);
                 }
@@ -348,14 +353,20 @@ impl LoginStrategy for FacebookLoginStrategy {
             LoginStatus::Captcha => {
                 info!("Captcha detected");
                 if let Some(data) = &mut result.data {
-                    data.insert("验证码".to_string(), serde_json::Value::String("需要".to_string()));
+                    data.insert(
+                        "验证码".to_string(),
+                        serde_json::Value::String("需要".to_string()),
+                    );
                 }
                 result.message = "检测到验证码".to_string();
             }
             LoginStatus::TwoFactor => {
                 info!("2FA detected");
                 if let Some(data) = &mut result.data {
-                    data.insert("2FA".to_string(), serde_json::Value::String("需要".to_string()));
+                    data.insert(
+                        "2FA".to_string(),
+                        serde_json::Value::String("需要".to_string()),
+                    );
                 }
                 result.message = "检测到 2FA".to_string();
             }

@@ -6,7 +6,7 @@ use async_trait::async_trait;
 pub mod facebook;
 
 #[async_trait]
-pub trait LoginStrategy: Send + Sync {
+pub trait BaseStrategy: Send + Sync {
     async fn run(
         &self,
         adapter: &dyn BrowserAdapter,
