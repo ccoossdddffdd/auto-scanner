@@ -103,4 +103,9 @@ impl BrowserAdapter for MockBrowserAdapter {
         info!("[Mock] Getting all text from {}", selector);
         Ok(vec!["5 friends".to_string(), "123 other text".to_string()])
     }
+
+    async fn select_option(&self, selector: &str, value: &str) -> Result<(), BrowserError> {
+        info!("[Mock] Selecting option '{}' in {}", value, selector);
+        Ok(())
+    }
 }

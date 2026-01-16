@@ -288,4 +288,17 @@ impl BrowserAdapter for PlaywrightAdapter {
 
         Ok(texts)
     }
+
+    async fn select_option(&self, selector: &str, value: &str) -> Result<(), BrowserError> {
+        self.page
+            .select_option_builder(selector)
+            .add_value(value.to_string())
+            .select_option()
+            .await
+            .map(|_: Vec<String>| ()) // Discard the return value
+            .map_err(|e| {
+                BrowserError::ElementNotFound(format!("选择下拉选项失败 {}: {}", selector, e))
+            })?;
+        Ok(())
+    }
 }

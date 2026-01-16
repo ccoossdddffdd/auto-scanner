@@ -64,4 +64,7 @@ pub trait BrowserAdapter: Send + Sync {
 
     /// Get text content of all matching elements
     async fn get_all_text(&self, selector: &str) -> Result<Vec<String>, BrowserError>;
+
+    /// Select an option in a select element
+    async fn select_option(&self, selector: &str, value: &str) -> Result<(), BrowserError>;
 }
