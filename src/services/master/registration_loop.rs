@@ -7,6 +7,7 @@ use chrono::Local;
 use std::sync::Arc;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
+use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
 pub struct RegistrationLoopHandler {
@@ -33,11 +34,14 @@ impl RegistrationLoopHandler {
     // Alternative: Just spawn `thread_count` long-running loops.
     pub async fn run_continuously(&self) {
         let mut handles = Vec::new();
+        // Add a global lock to serialize tasks
+        let global_lock = Arc::new(Mutex::new(()));
 
         for _ in 0..self.config.thread_count {
             let coordinator = self.create_coordinator();
             let context = self.context.clone();
             // let config = self.config.clone();
+            let lock = global_lock.clone();
 
             let handle = tokio::spawn(async move {
                 loop {
@@ -52,7 +56,11 @@ impl RegistrationLoopHandler {
 
                     let dummy_account =
                         Account::new("new_user".to_string(), "password".to_string());
+
+                    // Acquire global lock to ensure only one registration happens at a time
+                    let _guard = lock.lock().await;
                     let (_, result) = coordinator.spawn_worker(0, &dummy_account).await;
+                    drop(_guard); // Release lock immediately after task completes
 
                     if let Some(res) = result {
                         // The strategy returns "处理中" for now as success placeholder
