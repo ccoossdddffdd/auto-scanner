@@ -11,6 +11,16 @@ use tracing::info;
 
 use super::BaseStrategy;
 
+use crate::infrastructure::adspower::ProfileConfig;
+
+pub fn get_profile_config() -> ProfileConfig {
+    ProfileConfig {
+        group_id: "0".to_string(),
+        domain_name: "outlook.com".to_string(),
+        open_urls: vec!["https://signup.live.com/".to_string()],
+    }
+}
+
 pub struct OutlookRegisterStrategy;
 
 impl OutlookRegisterStrategy {
