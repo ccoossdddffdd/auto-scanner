@@ -87,7 +87,14 @@ impl WorkerCoordinator {
     ) -> Option<AdsPowerSession> {
         let client = self.adspower.as_ref()?;
 
-        let profile_id = match client.ensure_profile_for_thread(thread_index).await {
+        // Get strategy-specific profile config
+        let profile_config = if self.strategy == "facebook_login" {
+            Some(crate::strategies::facebook_login::get_profile_config())
+        } else {
+            None
+        };
+
+        let profile_id = match client.ensure_profile_for_thread(thread_index, profile_config.as_ref()).await {
             Ok(id) => id,
             Err(e) => {
                 error!("确保线程 {} 的 AdsPower 配置文件失败: {}", thread_index, e);

@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use crate::core::error::{AppError, AppResult};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -14,13 +14,15 @@ pub struct AdsPowerConfig {
 }
 
 impl AdsPowerConfig {
-    pub fn from_env() -> Result<Self> {
+    pub fn from_env() -> AppResult<Self> {
         let api_url = std::env::var("ADSPOWER_API_URL")
             .unwrap_or_else(|_| "http://127.0.0.1:50325".to_string());
 
         let api_key = std::env::var("ADSPOWER_API_KEY")
             .or_else(|_| std::env::var("ADSPOWER_TOKEN"))
-            .context("缺少环境变量: ADSPOWER_API_KEY 或 ADSPOWER_TOKEN")?;
+            .map_err(|_| {
+                AppError::Config("缺少环境变量: ADSPOWER_API_KEY 或 ADSPOWER_TOKEN".to_string())
+            })?;
 
         let proxy_id = std::env::var("ADSPOWER_PROXYID").ok();
 
@@ -105,11 +107,11 @@ impl AdsPowerClient {
         method: &str,
         url: &str,
         body: Option<serde_json::Value>,
-    ) -> Result<reqwest::Response> {
+    ) -> AppResult<reqwest::Response> {
         let mut request_builder = match method {
             "GET" => self.client.get(url),
             "POST" => self.client.post(url),
-            _ => anyhow::bail!("不支持的 HTTP 方法: {}", method),
+            _ => return Err(AppError::Network(format!("不支持的 HTTP 方法: {}", method))),
         };
 
         request_builder = request_builder.header("api-key", &self.config.api_key);
@@ -125,11 +127,11 @@ impl AdsPowerClient {
         request_builder
             .send()
             .await
-            .context(format!("发送请求到 {} 失败", url))
+            .map_err(|e| AppError::Network(format!("发送请求到 {} 失败: {}", url, e)))
     }
 
     /// 统一的 API 调用封装
-    async fn call_api<T, R>(&self, method: &str, endpoint: &str, body: Option<T>) -> Result<R>
+    async fn call_api<T, R>(&self, method: &str, endpoint: &str, body: Option<T>) -> AppResult<R>
     where
         T: serde::Serialize,
         R: serde::de::DeserializeOwned,
@@ -140,16 +142,22 @@ impl AdsPowerClient {
         let body_json = body.map(|b| serde_json::to_value(b).unwrap_or(json!({})));
 
         let response = self.send_request(method, &url, body_json).await?;
-        let resp: ApiResponse<R> = response.json().await?;
+        let resp: ApiResponse<R> = response
+            .json()
+            .await
+            .map_err(|e| AppError::Parse(format!("解析 API 响应失败: {}", e)))?;
 
         if resp.code != 0 {
-            anyhow::bail!("AdsPower API 错误 ({}): {}", endpoint, resp.msg);
+            return Err(AppError::ExternalService(format!(
+                "AdsPower API 错误 ({}): {}",
+                endpoint, resp.msg
+            )));
         }
 
         info!("AdsPower API 调用完成: {} {}", method, endpoint);
 
         resp.data
-            .context(format!("API {} 返回成功但无数据", endpoint))
+            .ok_or_else(|| AppError::ExternalService(format!("API {} 返回成功但无数据", endpoint)))
     }
 
     /// 发送 GET 请求（带查询参数）
@@ -157,22 +165,29 @@ impl AdsPowerClient {
         &self,
         endpoint: &str,
         query: &[(&str, &str)],
-    ) -> Result<Option<R>>
+    ) -> AppResult<Option<R>>
     where
         R: serde::de::DeserializeOwned,
     {
         info!("开始 AdsPower API 查询调用: GET {} {:?}", endpoint, query);
 
         let url = format!("{}{}", self.config.api_url, endpoint);
-        let url_with_query = reqwest::Url::parse_with_params(&url, query)?;
+        let url_with_query = reqwest::Url::parse_with_params(&url, query)
+            .map_err(|e| AppError::Parse(format!("构建 URL 失败: {}", e)))?;
 
         let response = self
             .send_request("GET", url_with_query.as_str(), None)
             .await?;
-        let resp: ApiResponse<R> = response.json().await?;
+        let resp: ApiResponse<R> = response
+            .json()
+            .await
+            .map_err(|e| AppError::Parse(format!("解析 API 响应失败: {}", e)))?;
 
         if resp.code != 0 {
-            anyhow::bail!("AdsPower API 错误 ({}): {}", endpoint, resp.msg);
+            return Err(AppError::ExternalService(format!(
+                "AdsPower API 错误 ({}): {}",
+                endpoint, resp.msg
+            )));
         }
 
         info!("AdsPower API 查询调用完成: GET {}", endpoint);
@@ -180,7 +195,7 @@ impl AdsPowerClient {
         Ok(resp.data)
     }
 
-    pub async fn check_connectivity(&self) -> Result<()> {
+    pub async fn check_connectivity(&self) -> AppResult<()> {
         // 使用 /api/v1/user/list 接口检查连接（更可靠）
         // /status 接口可能返回空响应
         info!("正在检查 AdsPower API 连接性...");
@@ -203,29 +218,32 @@ impl AdsPowerClient {
                     || error_msg.contains("timeout")
                     || error_msg.contains("refused")
                 {
-                    anyhow::bail!(
+                    return Err(AppError::Network(format!(
                         "无法连接到 AdsPower API ({})。\n\n\
                         请确保：\n\
                         1. AdsPower 客户端已启动\n\
                         2. AdsPower 正在监听 {}\n\
                         3. AdsPower 的 API 功能已启用\n\n\
                         提示：请打开 AdsPower 客户端后重试。",
-                        self.config.api_url,
-                        self.config.api_url
-                    );
+                        self.config.api_url, self.config.api_url
+                    )));
                 }
 
                 // 其他错误（如 API 返回错误代码）
-                anyhow::bail!(
+                Err(AppError::ExternalService(format!(
                     "AdsPower API 返回错误：{}\n\n\
                     请检查 AdsPower 客户端状态。",
                     error_msg
-                );
+                )))
             }
         }
     }
 
-    pub async fn ensure_profiles_for_workers(&self, worker_count: usize) -> Result<()> {
+    pub async fn ensure_profiles_for_workers(
+        &self,
+        worker_count: usize,
+        config: Option<&ProfileConfig>,
+    ) -> AppResult<()> {
         info!(
             "正在为 {} 个 Worker 检查 AdsPower 配置文件...",
             worker_count
@@ -245,7 +263,7 @@ impl AdsPowerClient {
             let target_name = format!("auto-scanner-worker-{}", i);
             if !existing_names.contains(&target_name) {
                 info!("正在创建缺失的配置文件: {}", target_name);
-                let user_id = self.create_profile(&target_name, None).await?;
+                let user_id = self.create_profile(&target_name, config).await?;
                 info!("已创建配置文件 {}，ID: {}", target_name, user_id);
             } else {
                 info!("配置文件已存在: {}", target_name);
@@ -254,7 +272,11 @@ impl AdsPowerClient {
         Ok(())
     }
 
-    pub async fn ensure_profile_for_thread(&self, thread_index: usize) -> Result<String> {
+    pub async fn ensure_profile_for_thread(
+        &self,
+        thread_index: usize,
+        config: Option<&ProfileConfig>,
+    ) -> AppResult<String> {
         let profile_name = format!("auto-scanner-worker-{}", thread_index);
 
         // 1. Try to find the profile for this thread
@@ -268,14 +290,14 @@ impl AdsPowerClient {
 
         // 2. Create new profile if not found
         info!("正在为线程 {} 创建新的 AdsPower 配置文件", thread_index);
-        self.create_profile(&profile_name, None).await
+        self.create_profile(&profile_name, config).await
     }
 
-    pub async fn ensure_single_profile(&self) -> Result<String> {
-        self.ensure_profile_for_thread(0).await
+    pub async fn ensure_single_profile(&self, config: Option<&ProfileConfig>) -> AppResult<String> {
+        self.ensure_profile_for_thread(0, config).await
     }
 
-    async fn find_profile_by_username(&self, username: &str) -> Result<Option<String>> {
+    async fn find_profile_by_username(&self, username: &str) -> AppResult<Option<String>> {
         let data: Option<ProfileListResponse> = self
             .call_api_with_query("/api/v1/user/list", &[("page_size", "2000")])
             .await?;
@@ -297,7 +319,7 @@ impl AdsPowerClient {
         &self,
         username: &str,
         profile_config: Option<&ProfileConfig>,
-    ) -> Result<String> {
+    ) -> AppResult<String> {
         // 随机选择操作系统：Windows 或 Mac
         // 使用时间戳的纳秒部分来决定（避免跨 await 的 Send 问题）
         use std::time::{SystemTime, UNIX_EPOCH};
@@ -343,7 +365,7 @@ impl AdsPowerClient {
             .config
             .proxy_id
             .as_ref()
-            .context("需要 ADSPOWER_PROXYID 配置")?;
+            .ok_or_else(|| AppError::Config("需要 ADSPOWER_PROXYID 配置".to_string()))?;
 
         if let Some(obj) = body.as_object_mut() {
             obj.insert(
@@ -367,7 +389,7 @@ impl AdsPowerClient {
         Ok(resp.id)
     }
 
-    pub async fn start_browser(&self, user_id: &str) -> Result<String> {
+    pub async fn start_browser(&self, user_id: &str) -> AppResult<String> {
         let data: Option<StartBrowserResponse> = self
             .call_api_with_query(
                 "/api/v1/browser/start",
@@ -379,15 +401,15 @@ impl AdsPowerClient {
             )
             .await?;
 
-        let ws_url = data
-            .map(|d| d.ws.puppeteer)
-            .context("从启动浏览器响应中获取 WebSocket URL 失败")?;
+        let ws_url = data.map(|d| d.ws.puppeteer).ok_or_else(|| {
+            AppError::ExternalService("从启动浏览器响应中获取 WebSocket URL 失败".to_string())
+        })?;
 
         info!("AdsPower 浏览器已启动: {}", ws_url);
         Ok(ws_url)
     }
 
-    pub async fn stop_browser(&self, user_id: &str) -> Result<()> {
+    pub async fn stop_browser(&self, user_id: &str) -> AppResult<()> {
         // 停止浏览器接口可能返回 data: null，这是正常的
         match self
             .call_api_with_query::<serde_json::Value>(
@@ -409,7 +431,7 @@ impl AdsPowerClient {
         }
     }
 
-    pub async fn delete_profile(&self, user_id: &str) -> Result<()> {
+    pub async fn delete_profile(&self, user_id: &str) -> AppResult<()> {
         let body = json!({
             "user_ids": [user_id]
         });

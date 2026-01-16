@@ -1,6 +1,7 @@
 use super::BaseStrategy;
 use crate::core::models::{Account, WorkerResult};
 use crate::infrastructure::browser::BrowserAdapter;
+use crate::infrastructure::adspower::ProfileConfig;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use tracing::info;
@@ -11,6 +12,14 @@ use constants::FacebookConfig;
 // Initialize global configuration
 static CONFIG: once_cell::sync::Lazy<FacebookConfig> =
     once_cell::sync::Lazy::new(FacebookConfig::default);
+
+pub fn get_profile_config() -> ProfileConfig {
+    ProfileConfig {
+        group_id: "0".to_string(),
+        domain_name: "facebook.com".to_string(),
+        open_urls: vec!["https://www.facebook.com".to_string()],
+    }
+}
 
 #[derive(Default)]
 pub struct FacebookLoginStrategy;

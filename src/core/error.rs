@@ -31,6 +31,12 @@ pub enum AppError {
     #[error("Parse error: {0}")]
     Parse(String),
 
+    #[error("Network error: {0}")]
+    Network(String),
+
+    #[error("External service error: {0}")]
+    ExternalService(String),
+
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }

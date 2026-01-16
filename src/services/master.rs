@@ -21,16 +21,24 @@ use tracing::{error, info, warn};
 
 const PID_FILE: &str = "auto-scanner-master.pid";
 
-/// Master 上下文 - 包含所有运行时状态
-struct MasterContext {
+struct RuntimeState {
     input_path: PathBuf,
     doned_dir: PathBuf,
-    adspower: Option<Arc<AdsPowerClient>>,
     exe_path: PathBuf,
-    email_monitor: Option<Arc<EmailMonitor>>,
     permit_rx: async_channel::Receiver<usize>,
     permit_tx: async_channel::Sender<usize>,
     processing_files: Arc<std::sync::Mutex<HashSet<PathBuf>>>,
+}
+
+struct ServiceContainer {
+    adspower: Option<Arc<AdsPowerClient>>,
+    email_monitor: Option<Arc<EmailMonitor>>,
+}
+
+/// Master 上下文 - 包含所有运行时状态
+struct MasterContext {
+    state: RuntimeState,
+    services: ServiceContainer,
 }
 
 impl MasterContext {
@@ -57,14 +65,18 @@ impl MasterContext {
         };
 
         Ok(Self {
-            input_path,
-            doned_dir,
-            adspower,
-            exe_path,
-            email_monitor,
-            permit_rx,
-            permit_tx,
-            processing_files: Arc::new(std::sync::Mutex::new(HashSet::new())),
+            state: RuntimeState {
+                input_path,
+                doned_dir,
+                exe_path,
+                permit_rx,
+                permit_tx,
+                processing_files: Arc::new(std::sync::Mutex::new(HashSet::new())),
+            },
+            services: ServiceContainer {
+                adspower,
+                email_monitor,
+            },
         })
     }
 
@@ -99,7 +111,7 @@ impl FileProcessingHandler {
 
     /// 统一获取锁的处理函数
     fn lock_processing_files(&self) -> std::sync::MutexGuard<'_, HashSet<PathBuf>> {
-        match self.context.processing_files.lock() {
+        match self.context.state.processing_files.lock() {
             Ok(guard) => guard,
             Err(poisoned) => {
                 error!("Mutex poisoned: {:?}", poisoned);
@@ -128,9 +140,9 @@ impl FileProcessingHandler {
             &csv_path,
             &batch_name,
             process_config,
-            self.context.permit_rx.clone(),
-            self.context.permit_tx.clone(),
-            self.context.email_monitor.clone(),
+            self.context.state.permit_rx.clone(),
+            self.context.state.permit_tx.clone(),
+            self.context.services.email_monitor.clone(),
         )
         .await;
 
@@ -155,16 +167,16 @@ impl FileProcessingHandler {
         let browser_config = BrowserConfig {
             backend: self.config.backend.clone(),
             remote_url: self.config.remote_url.clone(),
-            adspower: self.context.adspower.clone(),
+            adspower: self.context.services.adspower.clone(),
         };
 
         let worker_config = WorkerConfig {
-            exe_path: self.context.exe_path.clone(),
+            exe_path: self.context.state.exe_path.clone(),
             strategy: self.config.strategy.clone(),
         };
 
         let file_config = FileConfig {
-            doned_dir: self.context.doned_dir.clone(),
+            doned_dir: self.context.state.doned_dir.clone(),
         };
 
         ProcessConfig::new(batch_name, browser_config, worker_config, file_config)
@@ -335,13 +347,13 @@ pub async fn run(config: MasterConfig) -> Result<()> {
     let (tx, mut rx) = mpsc::channel::<PathBuf>(100);
 
     // 扫描现有文件
-    let entries = fs::read_dir(&context.input_path)?;
+    let entries = fs::read_dir(&context.state.input_path)?;
     for entry in entries {
         let entry = entry?;
         let path = entry.path();
         if is_supported_file(&path) {
             let should_process = {
-                let mut processing = match context.processing_files.lock() {
+                let mut processing = match context.state.processing_files.lock() {
                     Ok(guard) => guard,
                     Err(poisoned) => {
                         error!("Mutex poisoned during initial scan: {:?}", poisoned);
@@ -358,11 +370,11 @@ pub async fn run(config: MasterConfig) -> Result<()> {
 
     // 设置文件监控器
     let mut watcher = create_file_watcher(
-        &context.input_path,
+        &context.state.input_path,
         tx.clone(),
-        context.processing_files.clone(),
+        context.state.processing_files.clone(),
     )?;
-    watcher.watch(&context.input_path, RecursiveMode::NonRecursive)?;
+    watcher.watch(&context.state.input_path, RecursiveMode::NonRecursive)?;
 
     // 创建文件处理器
     let handler = FileProcessingHandler::new(config, context);
