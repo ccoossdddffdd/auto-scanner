@@ -1,5 +1,7 @@
 use crate::services::worker::strategy::WorkerStrategy;
-use crate::strategies::{facebook_login::FacebookLoginStrategy, BaseStrategy};
+use crate::strategies::{
+    facebook_login::FacebookLoginStrategy, outlook_register::OutlookRegisterStrategy, BaseStrategy,
+};
 use anyhow::Result;
 
 pub struct StrategyFactory;
@@ -8,6 +10,7 @@ impl StrategyFactory {
     pub fn create(strategy: WorkerStrategy) -> Result<Box<dyn BaseStrategy>> {
         match strategy {
             WorkerStrategy::FacebookLogin => Ok(Box::new(FacebookLoginStrategy::new())),
+            WorkerStrategy::OutlookRegister => Ok(Box::new(OutlookRegisterStrategy::new())),
         }
     }
 }

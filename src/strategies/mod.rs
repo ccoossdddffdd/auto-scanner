@@ -4,6 +4,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 
 pub mod facebook_login;
+pub mod outlook_register;
 
 #[async_trait]
 pub trait BaseStrategy: Send + Sync {
