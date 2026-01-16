@@ -1,4 +1,4 @@
-use crate::infrastructure::adspower::AdsPowerClient;
+use crate::infrastructure::adspower::{AdsPowerClient, AdsPowerConfig};
 use crate::infrastructure::logging::init_logging;
 use crate::infrastructure::process::PidManager;
 use crate::services::email::tracker::FileTracker;
@@ -36,23 +36,13 @@ struct MasterContext {
 impl MasterContext {
     /// 初始化 Master 上下文
     async fn initialize(config: &MasterConfig, input_dir: String) -> Result<Self> {
-        let input_path = PathBuf::from(&input_dir);
-        if !input_path.exists() {
-            fs::create_dir_all(&input_path).context("Failed to create monitoring directory")?;
-        }
+        let input_path = Self::ensure_dir(&input_dir, "monitoring")?;
 
-        let doned_dir =
-            PathBuf::from(std::env::var("DONED_DIR").unwrap_or_else(|_| "input/doned".to_string()));
-        if !doned_dir.exists() {
-            fs::create_dir_all(&doned_dir).context("Failed to create doned directory")?;
-        }
+        let doned_dir_str =
+            std::env::var("DONED_DIR").unwrap_or_else(|_| "input/doned".to_string());
+        let doned_dir = Self::ensure_dir(&doned_dir_str, "doned")?;
 
-        let adspower = if config.backend == "adspower" {
-            Some(Arc::new(AdsPowerClient::new()))
-        } else {
-            None
-        };
-
+        let adspower = Self::create_adspower_client(config)?;
         let email_monitor = initialize_email_monitor(config).await;
 
         let (permit_tx, permit_rx) = async_channel::bounded(config.thread_count);
@@ -76,6 +66,23 @@ impl MasterContext {
             permit_tx,
             processing_files: Arc::new(std::sync::Mutex::new(HashSet::new())),
         })
+    }
+
+    fn ensure_dir(path_str: &str, name: &str) -> Result<PathBuf> {
+        let path = PathBuf::from(path_str);
+        if !path.exists() {
+            fs::create_dir_all(&path).context(format!("创建 {} 目录失败", name))?;
+        }
+        Ok(path)
+    }
+
+    fn create_adspower_client(config: &MasterConfig) -> Result<Option<Arc<AdsPowerClient>>> {
+        if config.backend == "adspower" {
+            let adspower_config = AdsPowerConfig::from_env()?;
+            Ok(Some(Arc::new(AdsPowerClient::new(adspower_config))))
+        } else {
+            Ok(None)
+        }
     }
 }
 
@@ -263,7 +270,8 @@ async fn ensure_backend_ready(config: &MasterConfig) -> Result<()> {
     }
 
     if config.backend == "adspower" {
-        let client = AdsPowerClient::new();
+        let adspower_config = AdsPowerConfig::from_env()?;
+        let client = AdsPowerClient::new(adspower_config);
         client.check_connectivity().await?;
         info!("AdsPower API 可达");
     } else {

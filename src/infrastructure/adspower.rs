@@ -1,21 +1,52 @@
 use anyhow::{Context, Result};
 use reqwest::Client;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashSet;
-use std::env;
 use std::time::Duration;
 use tracing::{info, warn};
 
-fn get_api_url() -> String {
-    env::var("ADSPOWER_API_URL").unwrap_or_else(|_| "http://127.0.0.1:50325".to_string())
+#[derive(Debug, Clone)]
+pub struct AdsPowerConfig {
+    pub api_url: String,
+    pub api_key: String,
+    pub proxy_id: Option<String>,
 }
 
-fn get_api_key() -> Result<String> {
-    // 优先读取 ADSPOWER_API_KEY，如果没有则尝试读取 ADSPOWER_TOKEN
-    env::var("ADSPOWER_API_KEY")
-        .or_else(|_| env::var("ADSPOWER_TOKEN"))
-        .context("缺少环境变量: ADSPOWER_API_KEY 或 ADSPOWER_TOKEN")
+impl AdsPowerConfig {
+    pub fn from_env() -> Result<Self> {
+        let api_url = std::env::var("ADSPOWER_API_URL")
+            .unwrap_or_else(|_| "http://127.0.0.1:50325".to_string());
+
+        let api_key = std::env::var("ADSPOWER_API_KEY")
+            .or_else(|_| std::env::var("ADSPOWER_TOKEN"))
+            .context("缺少环境变量: ADSPOWER_API_KEY 或 ADSPOWER_TOKEN")?;
+
+        let proxy_id = std::env::var("ADSPOWER_PROXYID").ok();
+
+        Ok(Self {
+            api_url,
+            api_key,
+            proxy_id,
+        })
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProfileConfig {
+    pub group_id: String,
+    pub domain_name: String,
+    pub open_urls: Vec<String>,
+}
+
+impl Default for ProfileConfig {
+    fn default() -> Self {
+        Self {
+            group_id: "0".to_string(),
+            domain_name: "facebook.com".to_string(),
+            open_urls: vec!["https://www.facebook.com".to_string()],
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -53,22 +84,18 @@ struct WebSocketInfo {
 
 pub struct AdsPowerClient {
     client: Client,
-}
-
-impl Default for AdsPowerClient {
-    fn default() -> Self {
-        Self::new()
-    }
+    config: AdsPowerConfig,
 }
 
 impl AdsPowerClient {
-    pub fn new() -> Self {
+    pub fn new(config: AdsPowerConfig) -> Self {
         Self {
             client: Client::builder()
                 .timeout(Duration::from_secs(30))
                 .no_proxy()
                 .build()
                 .expect("创建 reqwest 客户端失败"),
+            config,
         }
     }
 
@@ -85,16 +112,9 @@ impl AdsPowerClient {
             _ => anyhow::bail!("不支持的 HTTP 方法: {}", method),
         };
 
-        match get_api_key() {
-            Ok(key) => {
-                request_builder = request_builder.header("api-key", &key);
-                request_builder =
-                    request_builder.header("Authorization", format!("Bearer {}", key));
-            }
-            Err(e) => {
-                warn!("获取 API Key 失败: {}, 但仍发送请求。", e);
-            }
-        }
+        request_builder = request_builder.header("api-key", &self.config.api_key);
+        request_builder =
+            request_builder.header("Authorization", format!("Bearer {}", self.config.api_key));
 
         if method == "POST" {
             if let Some(data) = body {
@@ -116,7 +136,7 @@ impl AdsPowerClient {
     {
         info!("开始 AdsPower API 调用: {} {}", method, endpoint);
 
-        let url = format!("{}{}", get_api_url(), endpoint);
+        let url = format!("{}{}", self.config.api_url, endpoint);
         let body_json = body.map(|b| serde_json::to_value(b).unwrap_or(json!({})));
 
         let response = self.send_request(method, &url, body_json).await?;
@@ -143,7 +163,7 @@ impl AdsPowerClient {
     {
         info!("开始 AdsPower API 查询调用: GET {} {:?}", endpoint, query);
 
-        let url = format!("{}{}", get_api_url(), endpoint);
+        let url = format!("{}{}", self.config.api_url, endpoint);
         let url_with_query = reqwest::Url::parse_with_params(&url, query)?;
 
         let response = self
@@ -184,12 +204,14 @@ impl AdsPowerClient {
                     || error_msg.contains("refused")
                 {
                     anyhow::bail!(
-                        "无法连接到 AdsPower API。\n\n\
+                        "无法连接到 AdsPower API ({})。\n\n\
                         请确保：\n\
                         1. AdsPower 客户端已启动\n\
-                        2. AdsPower 正在监听 http://127.0.0.1:50325\n\
+                        2. AdsPower 正在监听 {}\n\
                         3. AdsPower 的 API 功能已启用\n\n\
-                        提示：请打开 AdsPower 客户端后重试。"
+                        提示：请打开 AdsPower 客户端后重试。",
+                        self.config.api_url,
+                        self.config.api_url
                     );
                 }
 
@@ -223,7 +245,7 @@ impl AdsPowerClient {
             let target_name = format!("auto-scanner-worker-{}", i);
             if !existing_names.contains(&target_name) {
                 info!("正在创建缺失的配置文件: {}", target_name);
-                let user_id = self.create_profile(&target_name).await?;
+                let user_id = self.create_profile(&target_name, None).await?;
                 info!("已创建配置文件 {}，ID: {}", target_name, user_id);
             } else {
                 info!("配置文件已存在: {}", target_name);
@@ -246,7 +268,7 @@ impl AdsPowerClient {
 
         // 2. Create new profile if not found
         info!("正在为线程 {} 创建新的 AdsPower 配置文件", thread_index);
-        self.create_profile(&profile_name).await
+        self.create_profile(&profile_name, None).await
     }
 
     pub async fn ensure_single_profile(&self) -> Result<String> {
@@ -271,7 +293,11 @@ impl AdsPowerClient {
         Ok(None)
     }
 
-    async fn create_profile(&self, username: &str) -> Result<String> {
+    pub async fn create_profile(
+        &self,
+        username: &str,
+        profile_config: Option<&ProfileConfig>,
+    ) -> Result<String> {
         // 随机选择操作系统：Windows 或 Mac
         // 使用时间戳的纳秒部分来决定（避免跨 await 的 Send 问题）
         use std::time::{SystemTime, UNIX_EPOCH};
@@ -295,16 +321,14 @@ impl AdsPowerClient {
             username, ua_system_version
         );
 
-        // TODO: These values are currently hardcoded for Facebook.
-        // In the future, we should make them configurable based on the selected strategy.
-        let domain_name = "facebook.com";
-        let open_urls = ["https://www.facebook.com"];
+        let default_config = ProfileConfig::default();
+        let config = profile_config.unwrap_or(&default_config);
 
         let mut body = json!({
             "name": username,
-            "group_id": "0",
-            "domain_name": domain_name,
-            "open_urls": open_urls,
+            "group_id": config.group_id,
+            "domain_name": config.domain_name,
+            "open_urls": config.open_urls,
             "fingerprint_config": {
                 "random_ua": {
                     "ua_browser": ["chrome"],
@@ -313,8 +337,13 @@ impl AdsPowerClient {
             }
         });
 
-        // ADSPOWER_PROXYID is mandatory
-        let proxyid = env::var("ADSPOWER_PROXYID").context("需要 ADSPOWER_PROXYID 环境变量")?;
+        // ADSPOWER_PROXYID is mandatory if not provided in config (which it isn't currently)
+        // But we moved it to AdsPowerConfig
+        let proxyid = self
+            .config
+            .proxy_id
+            .as_ref()
+            .context("需要 ADSPOWER_PROXYID 配置")?;
 
         if let Some(obj) = body.as_object_mut() {
             obj.insert(
