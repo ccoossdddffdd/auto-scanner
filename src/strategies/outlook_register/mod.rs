@@ -78,6 +78,68 @@ impl BaseStrategy for OutlookRegisterStrategy {
         adapter.navigate("https://signup.live.com/").await?;
         self.random_sleep().await;
 
+        // Check for "Personal Data Export Permission" modal
+        // "同意并继续" button
+        // It might be an input[type="submit"] or button
+        // Based on typical MS flows, try to find a submit button with "同意" or "Agree" text if we are stuck.
+        // Or simply wait for the email input. If email input is not found, maybe we are blocked by this modal.
+        
+        // Let's try to detect if we are on the modal.
+        // A common way is to check for the "Agree and Continue" button.
+        // Selector for "同意并继续" button might be dynamic, but let's try a few common ones or check page content.
+        // For now, let's just blindly try to click it if email input is not found immediately? 
+        // No, that's slow.
+        
+        // Let's try to wait for email input with a shorter timeout, if fail, try to handle modal.
+        // But our adapter wait_for_element has default timeout.
+        
+        // Better approach: Check if the modal exists.
+        // Since we don't have `is_visible` in our simple adapter, we might need to rely on `wait_for_element` failure or just blindly click if present.
+        // However, standard `wait_for_element` throws error.
+        
+        // Let's assume the modal MIGHT appear.
+        // We can try to click the "Agree" button.
+        // Based on the text "同意并继续", we can try an XPath or CSS.
+        // Since our adapter mainly supports CSS selectors.
+        // Let's try to find the button by ID or Class if possible.
+        // In MS pages, primary action buttons often have id `iSignupAction` or `id__0` etc.
+        // But `iSignupAction` is also the "Next" button.
+        
+        // If the modal is blocking, it likely has a specific button.
+        // Let's try to click a button that contains "同意" if possible, but CSS :has-text is not standard (Playwright supports it).
+        // Since we use Playwright adapter, we can use Playwright-specific selectors!
+        // `text="同意并继续"` or `:text("同意并继续")`
+        
+        info!("Checking for data permission modal...");
+        // Try to click "同意并继续" if it exists. We use a short timeout trick if possible, 
+        // but our adapter doesn't expose timeout control per call easily.
+        // We can just try to click it. If it fails (not found), we ignore the error and proceed to email.
+        // But `click` usually waits.
+        
+        // Let's try to find it first.
+        // Using Playwright selector for text match
+        let agree_button_selector = "text=同意并继续";
+        // We attempt to click it. If it's not there, it might throw.
+        // We should wrap this in a "try-catch" block, but in Rust it's Result.
+        // However, if we wait for it and it's not there, we waste time.
+        // Ideally we check if it exists.
+        
+        // For now, let's assume if we see it, we click it.
+        // BUT, since we don't know if it appears, maybe we just proceed to email.
+        // The user says "did not enter email flow", implying we are stuck.
+        // So likely the modal IS there.
+        // So let's try to click it.
+        
+        match adapter.click(agree_button_selector).await {
+            Ok(_) => {
+                info!("Clicked 'Agree and Continue' on data permission modal");
+                self.random_sleep().await;
+            }
+            Err(_) => {
+                info!("Data permission modal not found or not clickable, proceeding...");
+            }
+        }
+
         // 2. Fill Email
         // Note: Selectors are based on typical Microsoft flows but might need adjustment if DOM changes
         // Common selectors: input[type="email"], #MemberName
