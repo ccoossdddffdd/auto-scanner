@@ -50,7 +50,7 @@ pub async fn run(
     };
 
     let strategy: Box<dyn BaseStrategy> = match strategy_name.as_str() {
-        "facebook" => Box::new(FacebookLoginStrategy::new()),
+        "facebook_login" => Box::new(FacebookLoginStrategy::new()),
         _ => {
             return Err(anyhow::anyhow!("Unsupported strategy: {}", strategy_name));
         }

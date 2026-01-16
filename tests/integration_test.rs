@@ -48,7 +48,7 @@ async fn test_end_to_end_workflow() {
         backend: "mock".to_string(),
         remote_url: "".to_string(),
         thread_count: 2,
-        strategy: "facebook".to_string(),
+        strategy: "facebook_login".to_string(),
         stop: false,
         daemon: false,
         status: false,

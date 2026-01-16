@@ -25,7 +25,7 @@ pub enum Commands {
         thread_count: usize,
 
         /// Login strategy to use
-        #[arg(long, default_value = "facebook")]
+        #[arg(long, default_value = "facebook_login")]
         strategy: String,
 
         /// Stop the running master process
@@ -67,7 +67,7 @@ pub enum Commands {
         backend: String,
 
         /// Login strategy to use
-        #[arg(long, default_value = "facebook")]
+        #[arg(long, default_value = "facebook_login")]
         strategy: String,
     },
 }
