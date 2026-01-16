@@ -5,12 +5,7 @@ use serde_json::json;
 use std::collections::HashSet;
 use std::env;
 use std::time::Duration;
-use tokio::sync::Mutex;
-use tokio::time::sleep;
 use tracing::{info, warn};
-
-// 全局 API 调用锁，确保同一时间只有一个 AdsPower API 请求
-static API_LOCK: once_cell::sync::Lazy<Mutex<()>> = once_cell::sync::Lazy::new(|| Mutex::new(()));
 
 fn get_api_url() -> String {
     env::var("ADSPOWER_API_URL").unwrap_or_else(|_| "http://127.0.0.1:50325".to_string())
@@ -77,42 +72,26 @@ impl AdsPowerClient {
         }
     }
 
-    /// 统一的 API 调用封装
-    async fn call_api<T, R>(&self, method: &str, endpoint: &str, body: Option<T>) -> Result<R>
-    where
-        T: serde::Serialize,
-        R: serde::de::DeserializeOwned,
-    {
-        // 获取全局 API 锁，确保同一时间只有一个请求
-        let _lock = API_LOCK.lock().await;
-
-        info!("AdsPower API call started: {} {}", method, endpoint);
-
-        // Add 1s delay to avoid rate limiting
-        sleep(Duration::from_secs(1)).await;
-
-        let url = format!("{}{}", get_api_url(), endpoint);
-
+    /// 底层请求发送逻辑
+    async fn send_request(
+        &self,
+        method: &str,
+        url: &str,
+        body: Option<serde_json::Value>,
+    ) -> Result<reqwest::Response> {
         let mut request_builder = match method {
-            "GET" => self.client.get(&url),
-            "POST" => self.client.post(&url),
+            "GET" => self.client.get(url),
+            "POST" => self.client.post(url),
             _ => anyhow::bail!("Unsupported HTTP method: {}", method),
         };
 
-        // 尝试从 get_api_key 获取 key，但无论是否配置都强制设置 api-key 头
-        // 如果未配置，则设置为空字符串或默认值，具体取决于 API 行为
-        // 根据用户反馈，必须设置 api-key 头，即使可能为空
         match get_api_key() {
             Ok(key) => {
-                // 某些版本使用 api-key
                 request_builder = request_builder.header("api-key", &key);
-                // 某些版本使用 Authorization Bearer
                 request_builder =
                     request_builder.header("Authorization", format!("Bearer {}", key));
             }
             Err(e) => {
-                // 如果环境变量未设置，但后端强制要求 api-key，尝试设置为空字符串
-                // 或者检查是否之前读取逻辑有问题
                 warn!("Failed to get API key: {}, but sending request anyway.", e);
             }
         }
@@ -123,11 +102,24 @@ impl AdsPowerClient {
             }
         }
 
-        let response = request_builder
+        request_builder
             .send()
             .await
-            .context(format!("Failed to call AdsPower API: {}", endpoint))?;
+            .context(format!("Failed to send request to {}", url))
+    }
 
+    /// 统一的 API 调用封装
+    async fn call_api<T, R>(&self, method: &str, endpoint: &str, body: Option<T>) -> Result<R>
+    where
+        T: serde::Serialize,
+        R: serde::de::DeserializeOwned,
+    {
+        info!("AdsPower API call started: {} {}", method, endpoint);
+
+        let url = format!("{}{}", get_api_url(), endpoint);
+        let body_json = body.map(|b| serde_json::to_value(b).unwrap_or(json!({})));
+
+        let response = self.send_request(method, &url, body_json).await?;
         let resp: ApiResponse<R> = response.json().await?;
 
         if resp.code != 0 {
@@ -149,39 +141,17 @@ impl AdsPowerClient {
     where
         R: serde::de::DeserializeOwned,
     {
-        // 获取全局 API 锁，确保同一时间只有一个请求
-        let _lock = API_LOCK.lock().await;
-
         info!(
             "AdsPower API query call started: GET {} {:?}",
             endpoint, query
         );
 
-        // Add 1s delay to avoid rate limiting
-        sleep(Duration::from_secs(1)).await;
-
         let url = format!("{}{}", get_api_url(), endpoint);
+        let url_with_query = reqwest::Url::parse_with_params(&url, query)?;
 
-        let mut request_builder = self.client.get(&url).query(query);
-
-        match get_api_key() {
-            Ok(key) => {
-                // 某些版本使用 api-key
-                request_builder = request_builder.header("api-key", &key);
-                // 某些版本使用 Authorization Bearer
-                request_builder =
-                    request_builder.header("Authorization", format!("Bearer {}", key));
-            }
-            Err(e) => {
-                warn!("Failed to get API key: {}, but sending request anyway.", e);
-            }
-        }
-
-        let response = request_builder
-            .send()
-            .await
-            .context(format!("Failed to call AdsPower API: {}", endpoint))?;
-
+        let response = self
+            .send_request("GET", url_with_query.as_str(), None)
+            .await?;
         let resp: ApiResponse<R> = response.json().await?;
 
         if resp.code != 0 {

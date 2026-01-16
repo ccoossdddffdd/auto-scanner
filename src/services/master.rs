@@ -93,22 +93,23 @@ impl FileProcessingHandler {
         Self { config, context }
     }
 
+    /// 统一获取锁的处理函数
+    fn lock_processing_files(&self) -> std::sync::MutexGuard<'_, HashSet<PathBuf>> {
+        match self.context.processing_files.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                error!("Mutex poisoned: {:?}", poisoned);
+                poisoned.into_inner()
+            }
+        }
+    }
+
     /// 处理传入的文件
     async fn handle_incoming_file(&self, csv_path: PathBuf) {
-        if !csv_path.exists() {
-            let mut processing = match self.context.processing_files.lock() {
-                Ok(guard) => guard,
-                Err(poisoned) => {
-                    error!(
-                        "Mutex poisoned while checking file existence: {:?}",
-                        poisoned
-                    );
-                    poisoned.into_inner()
-                }
-            };
-            processing.remove(&csv_path);
-            return;
-        }
+        // Remove redundant file existence check.
+        // We let process_file attempt to open it. If it fails, it returns an error,
+        // and we naturally fall through to the cleanup block.
+        // This avoids TOCTOU race conditions and simplifies lock handling.
 
         info!("Processing file: {:?}", csv_path);
         let batch_name = csv_path
@@ -129,14 +130,9 @@ impl FileProcessingHandler {
         )
         .await;
 
+        // Cleanup: remove from processing set regardless of success/failure
         {
-            let mut processing = match self.context.processing_files.lock() {
-                Ok(guard) => guard,
-                Err(poisoned) => {
-                    error!("Mutex poisoned after processing file: {:?}", poisoned);
-                    poisoned.into_inner()
-                }
-            };
+            let mut processing = self.lock_processing_files();
             processing.remove(&csv_path);
         }
 
@@ -210,7 +206,7 @@ fn create_file_watcher(
                                     error!("Failed to send file path to processor: {}", e);
                                     // If we can't send, we should remove it from processing set
                                     // so it can be picked up again later
-                                    // Note: we need to re-acquire the lock or handle this better, 
+                                    // Note: we need to re-acquire the lock or handle this better,
                                     // but since we are in the watcher callback, simple error logging is safer than complex recovery.
                                 }
                             }

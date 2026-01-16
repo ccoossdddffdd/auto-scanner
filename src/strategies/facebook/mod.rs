@@ -39,23 +39,31 @@ struct LoginResultDetector;
 
 impl LoginResultDetector {
     async fn detect_status(adapter: &dyn BrowserAdapter) -> LoginStatus {
-        // 并行检测多个状态
-        let (is_success, has_captcha, has_2fa, wrong_password, account_locked) = tokio::join!(
-            Self::check_success(adapter),
-            Self::check_captcha(adapter),
-            Self::check_2fa(adapter),
-            Self::check_wrong_password(adapter),
-            Self::check_account_locked(adapter),
+        // Optimization: Get URL once and pass it to check functions if needed.
+        // However, some checks might navigate or need fresh state, but for status detection
+        // which is usually read-only, passing the URL is a good optimization.
+        // NOTE: Currently check functions re-fetch URL. We can optimize this by passing the URL string.
+
+        let current_url = adapter.get_current_url().await.unwrap_or_default();
+
+        // 1. Check success first (most common case)
+        if Self::check_success(adapter, &current_url).await {
+            return LoginStatus::Success;
+        }
+
+        // 2. If not success, check for specific error states in parallel
+        let (has_captcha, has_2fa, wrong_password, account_locked) = tokio::join!(
+            Self::check_captcha(adapter, &current_url),
+            Self::check_2fa(adapter, &current_url),
+            Self::check_wrong_password(adapter, &current_url),
+            Self::check_account_locked(adapter, &current_url),
         );
 
-        if is_success {
-            LoginStatus::Success
-        } else if has_captcha {
+        if has_captcha {
             LoginStatus::Captcha
         } else if has_2fa {
             LoginStatus::TwoFactor
         } else if wrong_password {
-            // 先检查密码错误，因为密码错误的关键词更具体
             LoginStatus::WrongPassword
         } else if account_locked {
             LoginStatus::AccountLocked
@@ -64,15 +72,12 @@ impl LoginResultDetector {
         }
     }
 
-    async fn check_success(adapter: &dyn BrowserAdapter) -> bool {
-        // 首先检查 URL 是否表明登录失败
-        if let Ok(url) = adapter.get_current_url().await {
-            info!("Current URL: {}", url);
-            // 如果 URL 包含这些路径，说明未成功登录
-            if url.contains("/login") || url.contains("/checkpoint") {
-                info!("URL contains /login or /checkpoint, login failed");
-                return false;
-            }
+    async fn check_success(adapter: &dyn BrowserAdapter, url: &str) -> bool {
+        // Use cached URL
+        info!("Current URL: {}", url);
+        if url.contains("/login") || url.contains("/checkpoint") {
+            info!("URL contains /login or /checkpoint, login failed");
+            return false;
         }
 
         // 检查是否还存在登录表单（如果存在说明未登录）
@@ -122,19 +127,17 @@ impl LoginResultDetector {
         false
     }
 
-    async fn check_captcha(adapter: &dyn BrowserAdapter) -> bool {
+    async fn check_captcha(adapter: &dyn BrowserAdapter, url: &str) -> bool {
         // 方法1: 检查 URL 是否包含验证码标识
-        if let Ok(url) = adapter.get_current_url().await {
-            if url.contains("captcha")
-                || CONFIG
-                    .urls
-                    .checkpoints
-                    .iter()
-                    .any(|id| url.contains("checkpoint") && url.contains(id))
-            {
-                info!("URL indicates captcha required");
-                return true;
-            }
+        if url.contains("captcha")
+            || CONFIG
+                .urls
+                .checkpoints
+                .iter()
+                .any(|id| url.contains("checkpoint") && url.contains(id))
+        {
+            info!("URL indicates captcha required");
+            return true;
         }
 
         // 方法2: 检查特定的验证码元素
@@ -169,12 +172,10 @@ impl LoginResultDetector {
         false
     }
 
-    async fn check_2fa(adapter: &dyn BrowserAdapter) -> bool {
+    async fn check_2fa(adapter: &dyn BrowserAdapter, url: &str) -> bool {
         // 首先检查 URL 是否包含 two_step_verification
-        if let Ok(url) = adapter.get_current_url().await {
-            if url.contains("two_step_verification") {
-                return true;
-            }
+        if url.contains("two_step_verification") {
+            return true;
         }
 
         // 检查页面元素
@@ -184,12 +185,10 @@ impl LoginResultDetector {
             .unwrap_or(false)
     }
 
-    async fn check_wrong_password(adapter: &dyn BrowserAdapter) -> bool {
+    async fn check_wrong_password(adapter: &dyn BrowserAdapter, url: &str) -> bool {
         // 方法1: 检查 URL 是否包含密码错误标识
-        if let Ok(url) = adapter.get_current_url().await {
-            if url.contains("/login") && url.contains("error") {
-                info!("URL indicates login error (possibly wrong password)");
-            }
+        if url.contains("/login") && url.contains("error") {
+            info!("URL indicates login error (possibly wrong password)");
         }
 
         // 方法2: 检查特定的错误元素
@@ -198,17 +197,9 @@ impl LoginResultDetector {
                 if visible {
                     if let Ok(text) = adapter.get_text(selector).await {
                         info!("Found error message for password check: {}", text);
-
-                        // 先检查原文本（支持大小写敏感的非拉丁字符）
-                        for keyword in &CONFIG.keywords.wrong_password {
-                            if text.contains(keyword) {
-                                info!("Detected wrong password via keyword: {}", keyword);
-                                return true;
-                            }
-                        }
-
-                        // 再检查小写文本（支持拉丁字符的大小写不敏感匹配）
                         let text_lower = text.to_lowercase();
+
+                        // 仅检查小写文本
                         for keyword in &CONFIG.keywords.wrong_password {
                             if text_lower.contains(&keyword.to_lowercase()) {
                                 info!(
@@ -226,24 +217,22 @@ impl LoginResultDetector {
         false
     }
 
-    async fn check_account_locked(adapter: &dyn BrowserAdapter) -> bool {
+    async fn check_account_locked(adapter: &dyn BrowserAdapter, url: &str) -> bool {
         // 方法1: 检查 URL 模式
-        if let Ok(url) = adapter.get_current_url().await {
-            // checkpoint 通常表示账号被限制
-            if url.contains("/checkpoint") {
-                info!("URL contains /checkpoint, account may be locked");
+        // checkpoint 通常表示账号被限制
+        if url.contains("/checkpoint") {
+            info!("URL contains /checkpoint, account may be locked");
 
-                // 进一步检查是否真的是锁定而不是其他 checkpoint
-                // 如果不是 2FA checkpoint，很可能是账号锁定
-                if !url.contains("two_step") && !url.contains("2fa") {
-                    return true;
-                }
-            }
-
-            if url.contains("locked") || url.contains("disabled") || url.contains("suspended") {
-                info!("URL indicates account locked/disabled/suspended");
+            // 进一步检查是否真的是锁定而不是其他 checkpoint
+            // 如果不是 2FA checkpoint，很可能是账号锁定
+            if !url.contains("two_step") && !url.contains("2fa") {
                 return true;
             }
+        }
+
+        if url.contains("locked") || url.contains("disabled") || url.contains("suspended") {
+            info!("URL indicates account locked/disabled/suspended");
+            return true;
         }
 
         // 方法2: 检查特定的锁定页面元素

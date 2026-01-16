@@ -40,11 +40,17 @@ pub struct EmailMetadata {
     pub original_filename: String,
 }
 
+/// 邮件上下文
+#[derive(Debug, Clone)]
+struct EmailContext {
+    status: ProcessingStatus,
+    metadata: Option<EmailMetadata>,
+}
+
 /// 追踪器内部状态
 struct TrackerState {
-    email_status: HashMap<String, ProcessingStatus>,
+    contexts: HashMap<String, EmailContext>,
     file_to_email: HashMap<String, String>,
-    email_metadata: HashMap<String, EmailMetadata>,
 }
 
 /// 文件追踪器
@@ -63,9 +69,8 @@ impl FileTracker {
     pub fn new() -> Self {
         Self {
             state: Arc::new(Mutex::new(TrackerState {
-                email_status: HashMap::new(),
+                contexts: HashMap::new(),
                 file_to_email: HashMap::new(),
-                email_metadata: HashMap::new(),
             })),
         }
     }
@@ -80,10 +85,13 @@ impl FileTracker {
     /// 注册新邮件
     pub fn register_email(&self, email_id: &str) -> Result<()> {
         let mut state = self.lock_state()?;
-        state.email_status.insert(
+        state.contexts.insert(
             email_id.to_string(),
-            ProcessingStatus::Received {
-                timestamp: Local::now(),
+            EmailContext {
+                status: ProcessingStatus::Received {
+                    timestamp: Local::now(),
+                },
+                metadata: None,
             },
         );
         Ok(())
@@ -92,20 +100,35 @@ impl FileTracker {
     /// 存储邮件元数据
     pub fn store_email_metadata(&self, email_id: &str, metadata: EmailMetadata) -> Result<()> {
         let mut state = self.lock_state()?;
-        state.email_metadata.insert(email_id.to_string(), metadata);
+        if let Some(ctx) = state.contexts.get_mut(email_id) {
+            ctx.metadata = Some(metadata);
+        } else {
+            // 如果不存在，创建一个新的上下文（虽然这种情况很少见）
+            state.contexts.insert(
+                email_id.to_string(),
+                EmailContext {
+                    status: ProcessingStatus::Received {
+                        timestamp: Local::now(),
+                    },
+                    metadata: Some(metadata),
+                },
+            );
+        }
         Ok(())
     }
 
     /// 原子性操作：注册邮件并存储元数据
     pub fn register_with_metadata(&self, email_id: &str, metadata: EmailMetadata) -> Result<()> {
         let mut state = self.lock_state()?;
-        state.email_status.insert(
+        state.contexts.insert(
             email_id.to_string(),
-            ProcessingStatus::Received {
-                timestamp: Local::now(),
+            EmailContext {
+                status: ProcessingStatus::Received {
+                    timestamp: Local::now(),
+                },
+                metadata: Some(metadata),
             },
         );
-        state.email_metadata.insert(email_id.to_string(), metadata);
         Ok(())
     }
 
@@ -119,13 +142,12 @@ impl FileTracker {
             .unwrap_or("unknown")
             .to_string();
 
-        state.email_status.insert(
-            email_id.to_string(),
-            ProcessingStatus::Downloaded {
+        if let Some(ctx) = state.contexts.get_mut(email_id) {
+            ctx.status = ProcessingStatus::Downloaded {
                 timestamp: Local::now(),
                 file_path,
-            },
-        );
+            };
+        }
         state.file_to_email.insert(filename, email_id.to_string());
 
         Ok(())
@@ -134,26 +156,24 @@ impl FileTracker {
     /// 更新为处理中状态
     pub fn mark_processing(&self, email_id: &str, file_path: PathBuf) -> Result<()> {
         let mut state = self.lock_state()?;
-        state.email_status.insert(
-            email_id.to_string(),
-            ProcessingStatus::Processing {
+        if let Some(ctx) = state.contexts.get_mut(email_id) {
+            ctx.status = ProcessingStatus::Processing {
                 timestamp: Local::now(),
                 file_path,
-            },
-        );
+            };
+        }
         Ok(())
     }
 
     /// 标记处理成功
     pub fn mark_success(&self, email_id: &str, processed_file: PathBuf) -> Result<()> {
         let mut state = self.lock_state()?;
-        state.email_status.insert(
-            email_id.to_string(),
-            ProcessingStatus::Success {
+        if let Some(ctx) = state.contexts.get_mut(email_id) {
+            ctx.status = ProcessingStatus::Success {
                 timestamp: Local::now(),
                 processed_file,
-            },
-        );
+            };
+        }
         Ok(())
     }
 
@@ -165,14 +185,13 @@ impl FileTracker {
         processed_file: Option<PathBuf>,
     ) -> Result<()> {
         let mut state = self.lock_state()?;
-        state.email_status.insert(
-            email_id.to_string(),
-            ProcessingStatus::Failed {
+        if let Some(ctx) = state.contexts.get_mut(email_id) {
+            ctx.status = ProcessingStatus::Failed {
                 timestamp: Local::now(),
                 error_message: error,
                 processed_file,
-            },
-        );
+            };
+        }
         Ok(())
     }
 
@@ -208,13 +227,16 @@ impl FileTracker {
     /// 获取邮件状态
     pub fn get_status(&self, email_id: &str) -> Option<ProcessingStatus> {
         let state = self.lock_state().ok()?;
-        state.email_status.get(email_id).cloned()
+        state.contexts.get(email_id).map(|ctx| ctx.status.clone())
     }
 
     /// 获取邮件元数据
     pub fn get_email_metadata(&self, email_id: &str) -> Option<EmailMetadata> {
         let state = self.lock_state().ok()?;
-        state.email_metadata.get(email_id).cloned()
+        state
+            .contexts
+            .get(email_id)
+            .and_then(|ctx| ctx.metadata.clone())
     }
 
     /// 清理旧记录（超过24小时）
@@ -222,7 +244,7 @@ impl FileTracker {
         let cutoff = Local::now() - chrono::Duration::hours(24);
         let mut state = self.lock_state()?;
 
-        state.email_status.retain(|_, value| match value {
+        state.contexts.retain(|_, ctx| match &ctx.status {
             ProcessingStatus::Received { timestamp } => *timestamp > cutoff,
             ProcessingStatus::Downloaded { timestamp, .. } => *timestamp > cutoff,
             ProcessingStatus::Processing { timestamp, .. } => *timestamp > cutoff,
@@ -239,7 +261,7 @@ impl FileTracker {
             Ok(s) => s,
             Err(_) => return Vec::new(),
         };
-        state.email_status.keys().cloned().collect()
+        state.contexts.keys().cloned().collect()
     }
 }
 
