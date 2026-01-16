@@ -1,13 +1,13 @@
+use crate::services::worker::strategy::WorkerStrategy;
 use crate::strategies::{facebook_login::FacebookLoginStrategy, BaseStrategy};
 use anyhow::Result;
 
 pub struct StrategyFactory;
 
 impl StrategyFactory {
-    pub fn create(strategy_name: &str) -> Result<Box<dyn BaseStrategy>> {
-        match strategy_name {
-            "facebook_login" => Ok(Box::new(FacebookLoginStrategy::new())),
-            _ => Err(anyhow::anyhow!("不支持的策略: {}", strategy_name)),
+    pub fn create(strategy: WorkerStrategy) -> Result<Box<dyn BaseStrategy>> {
+        match strategy {
+            WorkerStrategy::FacebookLogin => Ok(Box::new(FacebookLoginStrategy::new())),
         }
     }
 }
@@ -18,13 +18,7 @@ mod tests {
 
     #[test]
     fn test_create_facebook_strategy() {
-        let strategy = StrategyFactory::create("facebook_login");
+        let strategy = StrategyFactory::create(WorkerStrategy::FacebookLogin);
         assert!(strategy.is_ok());
-    }
-
-    #[test]
-    fn test_create_unknown_strategy() {
-        let strategy = StrategyFactory::create("unknown_strategy");
-        assert!(strategy.is_err());
     }
 }

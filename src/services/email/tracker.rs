@@ -1,3 +1,4 @@
+use crate::core::time::{SystemTimeProvider, TimeProvider};
 use anyhow::Result;
 use chrono::{DateTime, Local};
 use std::collections::HashMap;
@@ -56,6 +57,7 @@ struct TrackerState {
 /// 文件追踪器
 pub struct FileTracker {
     state: Arc<Mutex<TrackerState>>,
+    time_provider: Arc<dyn TimeProvider>,
 }
 
 impl Default for FileTracker {
@@ -72,6 +74,18 @@ impl FileTracker {
                 contexts: HashMap::new(),
                 file_to_email: HashMap::new(),
             })),
+            time_provider: Arc::new(SystemTimeProvider),
+        }
+    }
+
+    /// 使用自定义时间提供者创建文件追踪器 (用于测试)
+    pub fn with_time_provider(time_provider: Arc<dyn TimeProvider>) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(TrackerState {
+                contexts: HashMap::new(),
+                file_to_email: HashMap::new(),
+            })),
+            time_provider,
         }
     }
 
@@ -82,6 +96,18 @@ impl FileTracker {
             .map_err(|e| anyhow::anyhow!("FileTracker lock poisoned: {}", e))
     }
 
+    /// 统一更新上下文的辅助函数
+    fn update_context<F>(&self, email_id: &str, f: F) -> Result<()>
+    where
+        F: FnOnce(&mut EmailContext),
+    {
+        let mut state = self.lock_state()?;
+        if let Some(ctx) = state.contexts.get_mut(email_id) {
+            f(ctx);
+        }
+        Ok(())
+    }
+
     /// 注册新邮件
     pub fn register_email(&self, email_id: &str) -> Result<()> {
         let mut state = self.lock_state()?;
@@ -89,7 +115,7 @@ impl FileTracker {
             email_id.to_string(),
             EmailContext {
                 status: ProcessingStatus::Received {
-                    timestamp: Local::now(),
+                    timestamp: self.time_provider.now(),
                 },
                 metadata: None,
             },
@@ -108,7 +134,7 @@ impl FileTracker {
                 email_id.to_string(),
                 EmailContext {
                     status: ProcessingStatus::Received {
-                        timestamp: Local::now(),
+                        timestamp: self.time_provider.now(),
                     },
                     metadata: Some(metadata),
                 },
@@ -124,7 +150,7 @@ impl FileTracker {
             email_id.to_string(),
             EmailContext {
                 status: ProcessingStatus::Received {
-                    timestamp: Local::now(),
+                    timestamp: self.time_provider.now(),
                 },
                 metadata: Some(metadata),
             },
@@ -144,7 +170,7 @@ impl FileTracker {
 
         if let Some(ctx) = state.contexts.get_mut(email_id) {
             ctx.status = ProcessingStatus::Downloaded {
-                timestamp: Local::now(),
+                timestamp: self.time_provider.now(),
                 file_path,
             };
         }
@@ -155,26 +181,22 @@ impl FileTracker {
 
     /// 更新为处理中状态
     pub fn mark_processing(&self, email_id: &str, file_path: PathBuf) -> Result<()> {
-        let mut state = self.lock_state()?;
-        if let Some(ctx) = state.contexts.get_mut(email_id) {
+        self.update_context(email_id, |ctx| {
             ctx.status = ProcessingStatus::Processing {
-                timestamp: Local::now(),
+                timestamp: self.time_provider.now(),
                 file_path,
             };
-        }
-        Ok(())
+        })
     }
 
     /// 标记处理成功
     pub fn mark_success(&self, email_id: &str, processed_file: PathBuf) -> Result<()> {
-        let mut state = self.lock_state()?;
-        if let Some(ctx) = state.contexts.get_mut(email_id) {
+        self.update_context(email_id, |ctx| {
             ctx.status = ProcessingStatus::Success {
-                timestamp: Local::now(),
+                timestamp: self.time_provider.now(),
                 processed_file,
             };
-        }
-        Ok(())
+        })
     }
 
     /// 标记处理失败
@@ -184,15 +206,13 @@ impl FileTracker {
         error: String,
         processed_file: Option<PathBuf>,
     ) -> Result<()> {
-        let mut state = self.lock_state()?;
-        if let Some(ctx) = state.contexts.get_mut(email_id) {
+        self.update_context(email_id, |ctx| {
             ctx.status = ProcessingStatus::Failed {
-                timestamp: Local::now(),
+                timestamp: self.time_provider.now(),
                 error_message: error,
                 processed_file,
             };
-        }
-        Ok(())
+        })
     }
 
     /// 更新文件路径映射（用于文件转换，如 txt -> csv）

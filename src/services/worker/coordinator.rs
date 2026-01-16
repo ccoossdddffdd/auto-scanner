@@ -1,11 +1,13 @@
 use crate::core::models::{Account, WorkerResult};
 use crate::infrastructure::browser_manager::BrowserEnvironmentManager;
+use crate::services::worker::orchestrator::WorkerOrchestrator;
 use crate::services::worker::output_parser::WorkerOutputParser;
 use crate::services::worker::process_executor::{ProcessExecutor, TokioProcessExecutor};
 use crate::services::worker::strategy_provider::{
     DefaultStrategyProfileProvider, StrategyProfileProvider,
 };
 use anyhow::Result;
+use async_trait::async_trait;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::process::Command;
@@ -189,5 +191,33 @@ impl WorkerCoordinator {
         }
 
         let _ = self.permit_tx.send(thread_index).await;
+    }
+}
+
+#[async_trait]
+impl WorkerOrchestrator for WorkerCoordinator {
+    async fn spawn_batch(&self, accounts: &[Account]) -> Vec<(usize, Option<WorkerResult>)> {
+        // Since we are cloning the coordinator inside the loop, we need to wrap self in Arc first
+        // But self is &WorkerCoordinator.
+        // The pattern used before was Arc<WorkerCoordinator>.
+        // Here we can just clone self because it implements Clone.
+        
+        let mut handles = Vec::new();
+        for (index, account) in accounts.iter().enumerate() {
+            let coord = self.clone();
+            let account = account.clone();
+            let handle = tokio::spawn(async move { coord.spawn_worker(index, &account).await });
+            handles.push(handle);
+        }
+
+        let mut results = Vec::new();
+        for handle in handles {
+            if let Ok(res) = handle.await {
+                results.push(res);
+            }
+        }
+
+        results.sort_by_key(|k| k.0);
+        results
     }
 }

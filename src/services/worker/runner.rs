@@ -3,8 +3,10 @@ use crate::infrastructure::browser::{
     mock_adapter::MockBrowserAdapter, playwright_adapter::PlaywrightAdapter, BrowserAdapter,
 };
 use crate::services::worker::factory::StrategyFactory;
+use crate::services::worker::strategy::WorkerStrategy;
 use crate::strategies::BaseStrategy;
 use anyhow::Result;
+use std::str::FromStr;
 use tracing::{error, info};
 
 pub async fn run(
@@ -44,7 +46,8 @@ pub async fn run(
         }
     };
 
-    let strategy: Box<dyn BaseStrategy> = StrategyFactory::create(&strategy_name)?;
+    let strategy_type = WorkerStrategy::from_str(&strategy_name)?;
+    let strategy: Box<dyn BaseStrategy> = StrategyFactory::create(strategy_type)?;
 
     let result = match strategy.run(adapter.as_ref(), &account).await {
         Ok(outcome) => {

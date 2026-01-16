@@ -44,7 +44,7 @@ fn main() -> Result<()> {
             // 初始化日志（需要先于配置加载，以便记录配置加载过程中的警告）
             init_logging("auto-scanner", master_config.daemon)?;
 
-            let app_config = AppConfig::new(master_config)?;
+            let app_config = AppConfig::from_env(master_config)?;
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(async { master::run(app_config).await })
         }

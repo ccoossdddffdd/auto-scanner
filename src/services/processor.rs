@@ -1,9 +1,9 @@
-use crate::core::models::{Account, WorkerResult};
 use crate::infrastructure::browser_manager::BrowserEnvironmentManager;
 use crate::services::email::monitor::EmailMonitor;
 use crate::services::file::get_account_source;
 use crate::services::file::operation::{ensure_csv_format, write_results_and_rename};
 use crate::services::worker::coordinator::WorkerCoordinator;
+use crate::services::worker::orchestrator::WorkerOrchestrator;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -108,10 +108,13 @@ pub async fn process_file(
     email_monitor: Option<Arc<EmailMonitor>>,
 ) -> Result<PathBuf> {
     let (path_to_process, converted) = ensure_csv_format(path).await?;
-    
+
     if converted {
         if let Some(monitor) = &email_monitor {
-            if let Err(e) = monitor.get_file_tracker().update_file_path(path, &path_to_process) {
+            if let Err(e) = monitor
+                .get_file_tracker()
+                .update_file_path(path, &path_to_process)
+            {
                 warn!("更新文件追踪器路径失败: {}", e);
             }
         }
@@ -154,7 +157,17 @@ async fn process_accounts(
 
     info!("从 {} 读取了 {} 个账号", batch_name, accounts.len());
 
-    let results = spawn_workers(&accounts, &config, permit_rx, permit_tx).await;
+    let coordinator = WorkerCoordinator::new(
+        permit_rx,
+        permit_tx,
+        config.browser.adspower.clone(),
+        config.worker.exe_path.clone(),
+        config.browser.backend.clone(),
+        config.browser.remote_url.clone(),
+        config.worker.strategy.clone(),
+    );
+
+    let results = coordinator.spawn_batch(&accounts).await;
 
     write_results_and_rename(
         path,
@@ -165,47 +178,4 @@ async fn process_accounts(
         &config.file.doned_dir,
     )
     .await
-}
-
-/// 批量启动 Workers
-async fn spawn_workers(
-    accounts: &[Account],
-    config: &ProcessConfig,
-    permit_rx: async_channel::Receiver<usize>,
-    permit_tx: async_channel::Sender<usize>,
-) -> Vec<(usize, Option<WorkerResult>)> {
-    let coordinator = Arc::new(WorkerCoordinator::new(
-        permit_rx,
-        permit_tx,
-        config.browser.adspower.clone(),
-        config.worker.exe_path.clone(),
-        config.browser.backend.clone(),
-        config.browser.remote_url.clone(),
-        config.worker.strategy.clone(),
-    ));
-
-    let mut handles = Vec::new();
-    for (index, account) in accounts.iter().enumerate() {
-        let coord = Arc::clone(&coordinator);
-        let account = account.clone();
-        let handle = tokio::spawn(async move { coord.spawn_worker(index, &account).await });
-        handles.push(handle);
-    }
-
-    collect_results(handles).await
-}
-
-/// 收集 Worker 结果
-async fn collect_results(
-    handles: Vec<tokio::task::JoinHandle<(usize, Option<WorkerResult>)>>,
-) -> Vec<(usize, Option<WorkerResult>)> {
-    let mut results = Vec::new();
-    for handle in handles {
-        if let Ok(res) = handle.await {
-            results.push(res);
-        }
-    }
-
-    results.sort_by_key(|k| k.0);
-    results
 }

@@ -62,8 +62,21 @@ async fn test_end_to_end_workflow() {
     let input_dir_str = input_dir.to_str().unwrap().to_string();
     env::set_var("INPUT_DIR", &input_dir_str);
     
-    // Create AppConfig
-    let app_config = AppConfig::new(config).expect("Failed to create AppConfig");
+    // Create AppConfig using the new pure constructor
+    // Note: We are using the pure constructor, so we don't need to rely on env vars for config creation,
+    // but some underlying services might still check them (like dotenv).
+    // However, AppConfig::new now takes arguments directly.
+    
+    // For integration test, we want to construct a valid AppConfig.
+    // Since backend is "mock", adspower config is None.
+    // email monitor is false, so email config is None.
+    
+    let app_config = AppConfig::new(
+        config, 
+        input_dir_str,
+        None, // adspower
+        None  // email
+    );
 
     let master_handle = tokio::spawn(async move {
         if let Err(e) = master::run(app_config).await {

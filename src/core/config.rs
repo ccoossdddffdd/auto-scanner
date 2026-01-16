@@ -13,7 +13,23 @@ pub struct AppConfig {
 }
 
 impl AppConfig {
-    pub fn new(master: MasterConfig) -> Result<Self> {
+    /// Pure constructor for testing
+    pub fn new(
+        master: MasterConfig,
+        input_dir: String,
+        adspower: Option<AdsPowerConfig>,
+        email: Option<EmailConfig>,
+    ) -> Self {
+        Self {
+            master,
+            adspower,
+            email,
+            input_dir,
+        }
+    }
+
+    /// Load from environment variables
+    pub fn from_env(master: MasterConfig) -> Result<Self> {
         dotenv::dotenv().ok();
 
         // Check essential env vars
@@ -29,9 +45,6 @@ impl AppConfig {
             match EmailConfig::from_env() {
                 Ok(c) => Some(c),
                 Err(e) => {
-                    // Log handled by caller or just ignored here?
-                    // Since this is a constructor, maybe we shouldn't log here unless we have logger initialized.
-                    // Logger is initialized in main before this.
                     tracing::warn!("创建邮件配置失败: {}, 禁用邮件监控", e);
                     None
                 }

@@ -16,26 +16,33 @@
 
 # Phase 3 Refactoring
 
-- [ ] **1. Refactor Facebook Strategy Run**
-    - [ ] Create `FacebookResultBuilder` to handle `WorkerResult` construction.
-    - [ ] Simplify `run` function to focus on flow control.
+- [x] **1. Refactor Facebook Strategy Run**
+- [x] **2. Abstract AdsPower Fingerprint Generation**
+- [x] **3. Encapsulate Master Lifecycle**
+- [x] **4. Generalize Login Status Detection**
+- [x] **5. Simplify Playwright Connection**
 
-- [ ] **2. Abstract AdsPower Fingerprint Generation**
-    - [ ] Create `FingerprintGenerator` module.
-    - [ ] Define `CreateProfileRequest` struct with `serde`.
-    - [ ] Refactor `create_profile` in `adspower.rs`.
+# Phase 4 Refactoring
 
-- [ ] **3. Encapsulate Master Lifecycle**
-    - [ ] Create `MasterServer` struct.
-    - [ ] Implement `bootstrap`, `start`, `shutdown` methods.
-    - [ ] Refactor `run` function in `master/mod.rs`.
+- [ ] **1. Abstract Time Provider**
+    - [ ] Create `TimeProvider` trait.
+    - [ ] Implement `SystemTimeProvider` and `MockTimeProvider`.
+    - [ ] Inject into `FileTracker`.
 
-- [ ] **4. Generalize Login Status Detection**
-    - [ ] Define `DetectionRule` struct.
-    - [ ] Implement generic `check_rule` method.
-    - [ ] Refactor `LoginStatusDetector` to use rules.
+- [ ] **2. Unified State Update**
+    - [ ] Create `update_context` helper method in `FileTracker`.
+    - [ ] Refactor all `mark_*` methods to use it.
 
-- [ ] **5. Simplify Playwright Connection**
-    - [ ] Extract `connect_cdp` logic.
-    - [ ] Extract error formatting.
-    - [ ] Flatten `PlaywrightAdapterBuilder::build`.
+- [ ] **3. Typed Strategy Factory**
+    - [ ] Create `WorkerStrategy` enum.
+    - [ ] Implement `FromStr` for `WorkerStrategy`.
+    - [ ] Update `StrategyFactory` and `Coordinator`.
+
+- [ ] **4. Inject Worker Orchestrator**
+    - [ ] Create `WorkerOrchestrator` trait.
+    - [ ] Implement for `WorkerCoordinator`.
+    - [ ] Inject into `process_accounts`.
+
+- [ ] **5. Separate Config Loading**
+    - [ ] Create `AppConfig::from_env`.
+    - [ ] Make `AppConfig::new` a pure constructor.
