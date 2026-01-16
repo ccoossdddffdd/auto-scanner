@@ -1,3 +1,4 @@
+pub mod registration_loop;
 pub mod scheduler;
 pub mod server;
 pub mod watcher;

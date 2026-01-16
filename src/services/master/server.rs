@@ -5,17 +5,20 @@ use crate::infrastructure::process::PidManager;
 use crate::services::email::tracker::FileTracker;
 use crate::services::email::EmailMonitor;
 use crate::services::file_policy::FilePolicyService;
+use crate::services::master::registration_loop::RegistrationLoopHandler;
 use crate::services::master::scheduler::JobScheduler;
 use crate::services::master::watcher::InputWatcher;
 use crate::services::master::MasterConfig;
 use crate::services::processor::{
     process_file, BrowserConfig, FileConfig, ProcessConfig, WorkerConfig,
 };
+use crate::services::worker::strategy::WorkerStrategy;
 use anyhow::{Context, Result};
 use reqwest::Url;
 use std::env;
 use std::fs;
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
@@ -23,23 +26,23 @@ use tracing::{error, info, warn};
 
 const PID_FILE: &str = "auto-scanner-master.pid";
 
-struct RuntimeState {
-    input_path: PathBuf,
-    doned_dir: PathBuf,
-    exe_path: PathBuf,
-    permit_rx: async_channel::Receiver<usize>,
-    permit_tx: async_channel::Sender<usize>,
-    scheduler: JobScheduler,
+pub struct RuntimeState {
+    pub input_path: PathBuf,
+    pub doned_dir: PathBuf,
+    pub exe_path: PathBuf,
+    pub permit_rx: async_channel::Receiver<usize>,
+    pub permit_tx: async_channel::Sender<usize>,
+    pub scheduler: JobScheduler,
 }
 
-struct ServiceContainer {
-    adspower: Option<Arc<dyn BrowserEnvironmentManager>>,
-    email_monitor: Option<Arc<EmailMonitor>>,
+pub struct ServiceContainer {
+    pub adspower: Option<Arc<dyn BrowserEnvironmentManager>>,
+    pub email_monitor: Option<Arc<EmailMonitor>>,
 }
 
-struct MasterContext {
-    state: RuntimeState,
-    services: ServiceContainer,
+pub struct MasterContext {
+    pub state: RuntimeState,
+    pub services: ServiceContainer,
 }
 
 impl MasterContext {
@@ -233,6 +236,37 @@ impl MasterServer {
         self.ensure_backend_ready().await?;
 
         let context = Arc::new(MasterContext::initialize(&self.config).await?);
+
+        // Check strategy type
+        let strategy = WorkerStrategy::from_str(&self.config.master.strategy)?;
+
+        match strategy {
+            WorkerStrategy::OutlookRegister => {
+                info!("检测到 Outlook 注册策略，启动无限注册循环...");
+                let loop_handler =
+                    RegistrationLoopHandler::new(self.config.master.clone(), context.clone());
+
+                // Run continuously until interrupted
+                tokio::select! {
+                    _ = loop_handler.run_continuously() => {},
+                    _ = tokio::signal::ctrl_c() => {
+                        info!("收到终止信号，正在停止...");
+                    }
+                }
+            }
+            WorkerStrategy::FacebookLogin => {
+                info!("检测到 Facebook 登录策略，启动文件监控模式...");
+                self.run_file_watcher_mode(context).await?;
+            }
+        }
+
+        pid_manager.remove_pid_file();
+        info!("Master 关闭完成");
+
+        Ok(())
+    }
+
+    async fn run_file_watcher_mode(&self, context: Arc<MasterContext>) -> Result<()> {
         let (tx, mut rx) = mpsc::channel::<PathBuf>(100);
 
         // 初始扫描
@@ -271,10 +305,6 @@ impl MasterServer {
                 }
             }
         }
-
-        pid_manager.remove_pid_file();
-        info!("Master 关闭完成");
-
         Ok(())
     }
 
