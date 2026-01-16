@@ -3,7 +3,7 @@ use crate::infrastructure::browser::BrowserAdapter;
 use anyhow::Result;
 use async_trait::async_trait;
 
-pub mod facebook;
+pub mod facebook_login;
 
 #[async_trait]
 pub trait BaseStrategy: Send + Sync {

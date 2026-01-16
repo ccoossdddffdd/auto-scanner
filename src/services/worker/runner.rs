@@ -2,7 +2,7 @@ use crate::core::models::{Account, WorkerResult};
 use crate::infrastructure::browser::{
     mock_adapter::MockBrowserAdapter, playwright_adapter::PlaywrightAdapter, BrowserAdapter,
 };
-use crate::strategies::{facebook::FacebookLoginStrategy, BaseStrategy};
+use crate::strategies::{facebook_login::FacebookLoginStrategy, BaseStrategy};
 use anyhow::Result;
 use tracing::{error, info};
 
