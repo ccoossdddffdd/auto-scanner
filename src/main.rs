@@ -15,7 +15,7 @@ fn main() -> Result<()> {
             backend,
             remote_url,
             thread_count,
-            enable_screenshot,
+            strategy,
             stop,
             daemon,
             status,
@@ -31,7 +31,7 @@ fn main() -> Result<()> {
                 backend,
                 remote_url,
                 thread_count,
-                enable_screenshot,
+                strategy,
                 stop,
                 daemon,
                 status,
@@ -47,14 +47,14 @@ fn main() -> Result<()> {
             password,
             remote_url,
             backend,
-            enable_screenshot,
+            strategy,
         } => {
             // Initialize logging for Worker
             init_logging("auto-scanner-worker", false)?;
 
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(async {
-                worker::run(username, password, remote_url, backend, enable_screenshot).await
+                worker::run(username, password, remote_url, backend, strategy).await
             })
         }
     };

@@ -156,7 +156,7 @@ impl FileProcessingHandler {
 
         let worker_config = WorkerConfig {
             exe_path: self.context.exe_path.clone(),
-            enable_screenshot: self.config.enable_screenshot,
+            strategy: self.config.strategy.clone(),
         };
 
         let file_config = FileConfig {
@@ -172,7 +172,7 @@ pub struct MasterConfig {
     pub backend: String,
     pub remote_url: String,
     pub thread_count: usize,
-    pub enable_screenshot: bool,
+    pub strategy: String,
     pub stop: bool,
     pub daemon: bool,
     pub status: bool,
@@ -320,8 +320,8 @@ pub async fn run(config: MasterConfig) -> Result<()> {
         std::env::var("INPUT_DIR").context("INPUT_DIR environment variable must be set")?;
 
     info!(
-        "Master started. Monitoring directory: {}, Threads: {}, Screenshots: {}, Backend: {}, Daemon: {}",
-        input_dir, config.thread_count, config.enable_screenshot, config.backend, config.daemon
+        "Master started. Monitoring directory: {}, Threads: {}, Strategy: {}, Backend: {}, Daemon: {}",
+        input_dir, config.thread_count, config.strategy, config.backend, config.daemon
     );
 
     if !config.daemon {

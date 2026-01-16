@@ -21,7 +21,7 @@ pub struct BrowserConfig {
 #[derive(Clone)]
 pub struct WorkerConfig {
     pub exe_path: PathBuf,
-    pub enable_screenshot: bool,
+    pub strategy: String,
 }
 
 /// 文件配置
@@ -172,7 +172,7 @@ async fn spawn_workers(
         exe_path: config.worker.exe_path.clone(),
         backend: config.browser.backend.clone(),
         remote_url: config.browser.remote_url.clone(),
-        enable_screenshot: config.worker.enable_screenshot,
+        strategy: config.worker.strategy.clone(),
     });
 
     let mut handles = Vec::new();

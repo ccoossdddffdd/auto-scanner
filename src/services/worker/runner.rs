@@ -11,11 +11,11 @@ pub async fn run(
     password: String,
     remote_url: String,
     backend: String,
-    enable_screenshot: bool,
+    strategy_name: String,
 ) -> Result<()> {
     info!(
-        "Worker started for account: {}. Screenshot enabled: {}",
-        username, enable_screenshot
+        "Worker started for account: {}. Strategy: {}",
+        username, strategy_name
     );
 
     let account = Account::new(username.clone(), password);
@@ -51,11 +51,14 @@ pub async fn run(
         }
     };
 
-    let strategy = FacebookLoginStrategy::new();
-    let result = match strategy
-        .login(adapter.as_ref(), &account, enable_screenshot)
-        .await
-    {
+    let strategy: Box<dyn LoginStrategy> = match strategy_name.as_str() {
+        "facebook" => Box::new(FacebookLoginStrategy::new()),
+        _ => {
+            return Err(anyhow::anyhow!("Unsupported strategy: {}", strategy_name));
+        }
+    };
+
+    let result = match strategy.login(adapter.as_ref(), &account).await {
         Ok(outcome) => {
             info!(
                 "Login process finished for {}. Success: {}",

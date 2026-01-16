@@ -7,10 +7,5 @@ pub mod facebook;
 
 #[async_trait]
 pub trait LoginStrategy: Send + Sync {
-    async fn login(
-        &self,
-        adapter: &dyn BrowserAdapter,
-        account: &Account,
-        enable_screenshot: bool,
-    ) -> Result<WorkerResult>;
+    async fn login(&self, adapter: &dyn BrowserAdapter, account: &Account) -> Result<WorkerResult>;
 }

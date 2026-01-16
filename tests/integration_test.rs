@@ -47,14 +47,14 @@ async fn test_end_to_end_workflow() {
     let config = MasterConfig {
         backend: "mock".to_string(),
         remote_url: "".to_string(),
-        thread_count: 1,
-        enable_screenshot: false,
+        thread_count: 2,
+        strategy: "facebook".to_string(),
         stop: false,
         daemon: false,
         status: false,
         enable_email_monitor: false,
         email_poll_interval: 60,
-        exe_path: Some(env::current_dir().unwrap().join(exe_path)),
+        exe_path: Some(PathBuf::from("target/debug/auto-scanner")),
     };
 
     // 5. Run Master in a separate task

@@ -24,9 +24,9 @@ pub enum Commands {
         #[arg(long, default_value = "1")]
         thread_count: usize,
 
-        /// Enable screenshots after login
-        #[arg(long, default_value = "false")]
-        enable_screenshot: bool,
+        /// Login strategy to use
+        #[arg(long, default_value = "facebook")]
+        strategy: String,
 
         /// Stop the running master process
         #[arg(long, default_value = "false")]
@@ -66,9 +66,9 @@ pub enum Commands {
         #[arg(long, default_value = "playwright")]
         backend: String,
 
-        /// Enable screenshots after login
-        #[arg(long, default_value = "false")]
-        enable_screenshot: bool,
+        /// Login strategy to use
+        #[arg(long, default_value = "facebook")]
+        strategy: String,
     },
 }
 

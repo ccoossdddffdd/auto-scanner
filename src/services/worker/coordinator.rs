@@ -20,7 +20,7 @@ pub struct WorkerCoordinator {
     pub exe_path: PathBuf,
     pub backend: String,
     pub remote_url: String,
-    pub enable_screenshot: bool,
+    pub strategy: String,
 }
 
 impl WorkerCoordinator {
@@ -126,11 +126,9 @@ impl WorkerCoordinator {
             .arg("--remote-url")
             .arg(remote_url)
             .arg("--backend")
-            .arg(&self.backend);
-
-        if self.enable_screenshot {
-            cmd.arg("--enable-screenshot");
-        }
+            .arg(&self.backend)
+            .arg("--strategy")
+            .arg(&self.strategy);
 
         cmd
     }

@@ -3,9 +3,6 @@ use crate::core::models::{Account, WorkerResult};
 use crate::infrastructure::browser::BrowserAdapter;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use chrono::Local;
-use std::fs;
-use std::path::Path;
 use tracing::info;
 
 pub mod constants;
@@ -267,12 +264,7 @@ impl LoginResultDetector {
 
 #[async_trait]
 impl LoginStrategy for FacebookLoginStrategy {
-    async fn login(
-        &self,
-        adapter: &dyn BrowserAdapter,
-        account: &Account,
-        enable_screenshot: bool,
-    ) -> Result<WorkerResult> {
+    async fn login(&self, adapter: &dyn BrowserAdapter, account: &Account) -> Result<WorkerResult> {
         info!("Navigating to Facebook...");
         adapter.navigate(&CONFIG.urls.base).await?;
 
@@ -369,10 +361,6 @@ impl LoginStrategy for FacebookLoginStrategy {
             }
         }
 
-        if enable_screenshot {
-            self.take_screenshot(adapter, &account.username).await?;
-        }
-
         Ok(result)
     }
 }
@@ -450,22 +438,5 @@ impl FacebookLoginStrategy {
         }
 
         digits.parse::<u32>().ok()
-    }
-
-    async fn take_screenshot(&self, adapter: &dyn BrowserAdapter, username: &str) -> Result<()> {
-        info!("Taking screenshot...");
-        let screenshot_dir = Path::new("screenshot");
-        if !screenshot_dir.exists() {
-            fs::create_dir_all(screenshot_dir).context("Failed to create screenshot directory")?;
-        }
-
-        let timestamp = Local::now().format("%Y%m%d-%H%M%S");
-        let safe_username = username.replace(['@', '.'], "_");
-        let filename = format!("screenshot/login_{}_{}.png", safe_username, timestamp);
-
-        adapter.take_screenshot(&filename).await?;
-        info!("Screenshot saved to {}", filename);
-
-        Ok(())
     }
 }
