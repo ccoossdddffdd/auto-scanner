@@ -2,7 +2,8 @@ use crate::core::models::{Account, WorkerResult};
 use crate::infrastructure::browser::{
     mock_adapter::MockBrowserAdapter, playwright_adapter::PlaywrightAdapter, BrowserAdapter,
 };
-use crate::strategies::{facebook_login::FacebookLoginStrategy, BaseStrategy};
+use crate::services::worker::factory::StrategyFactory;
+use crate::strategies::BaseStrategy;
 use anyhow::Result;
 use tracing::{error, info};
 
@@ -40,12 +41,7 @@ pub async fn run(
         }
     };
 
-    let strategy: Box<dyn BaseStrategy> = match strategy_name.as_str() {
-        "facebook_login" => Box::new(FacebookLoginStrategy::new()),
-        _ => {
-            return Err(anyhow::anyhow!("不支持的策略: {}", strategy_name));
-        }
-    };
+    let strategy: Box<dyn BaseStrategy> = StrategyFactory::create(&strategy_name)?;
 
     let result = match strategy.run(adapter.as_ref(), &account).await {
         Ok(outcome) => {
