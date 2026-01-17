@@ -241,31 +241,71 @@ impl BaseStrategy for OutlookRegisterStrategy {
         // Fill Birth Month
         info!("Filling Birth Month: {}", user_info.birth_month);
 
+        // The month selector is a custom dropdown (button + listbox)
+        // ID: #BirthMonthDropdown (button)
+        // Option list has role="listbox"
+        // Options have role="option"
+
         let month_val = user_info.birth_month.to_string();
 
-        // Try multiple selectors for Birth Month
-        // 1. ID: BirthMonthDropdown
-        // 2. Name: BirthMonth
-        // 3. Aria-label: "Birth month" or "出生月份"
-
-        let month_selectors = vec![
-            "#BirthMonthDropdown",
-            "select[name=\"BirthMonth\"]",
-            "select[aria-label=\"Birth month\"]",
-            "select[aria-label=\"出生月份\"]",
-        ];
-
-        let mut month_selected = false;
-        for selector in &month_selectors {
-            if let Ok(_) = adapter.select_option(selector, &month_val).await {
-                info!("Successfully selected month with selector: {}", selector);
-                month_selected = true;
-                break;
+        // 1. Click the dropdown button to open the list
+        if let Err(e) = adapter.click("#BirthMonthDropdown").await {
+            warn!("Failed to click BirthMonthDropdown: {}", e);
+            // Fallback to old methods just in case
+            if let Err(e2) = adapter
+                .select_option("select[name=\"BirthMonth\"]", &month_val)
+                .await
+            {
+                warn!("Fallback select month failed: {}", e2);
             }
-        }
+        } else {
+            // 2. Wait for list to appear (small delay is usually enough or we can wait for role=listbox)
+            tokio::time::sleep(Duration::from_millis(500)).await;
 
-        if !month_selected {
-            warn!("Failed to select month with all attempted selectors");
+            // 3. Click the option. Options usually contain the number or text.
+            // Construct a selector for the option.
+            // Since we don't know the exact text (e.g. "1" vs "1月" vs "January"),
+            // we can try to click by text matching the number.
+            // Or use the ID pattern seen in codegen: "fluent-option..." (unreliable).
+            // Best bet: text match.
+            // Note: user_info.birth_month is u32 (1-12).
+            // Page might show "1月", "1", "January".
+            // Let's try "text=X" first.
+
+            // let option_selector = format!("text={}", month_val); // Try strict match first? "1" might match many things.
+            // Better: role=option and text contains value.
+            // Playwright selector: [role="option"]:has-text("1") -- but adapter only supports basic text= or css.
+            // Our adapter's `click` uses `page.click_builder(selector)`. Playwright supports pseudo-selectors.
+            // Let's try `[role="option"] >> text="1月"` or just `text="1月"`.
+            // Since we saw "1月" in codegen output.
+
+            // Let's try adding "月" suffix if it's likely Chinese locale, or just the number.
+            // Microsoft often uses localized text.
+            // Let's try multiple potential text matches.
+            let month_texts = vec![
+                format!("{}月", month_val), // 1月
+                month_val.clone(),          // 1
+                                            // Add English months if needed
+            ];
+
+            let mut month_clicked = false;
+            for text in month_texts {
+                // let sel = format!("text=\"{}\"", text); // Quote text for exact match or safety
+                // Actually playwright `text=Foo` is contains match usually?
+                // `text="Foo"` is exact match.
+                // Let's try `text=1月` (unquoted) for loose match?
+                let loose_sel = format!("text={}", text);
+
+                if let Ok(_) = adapter.click(&loose_sel).await {
+                    info!("Clicked month option: {}", text);
+                    month_clicked = true;
+                    break;
+                }
+            }
+
+            if !month_clicked {
+                warn!("Failed to click any month option for value: {}", month_val);
+            }
         }
 
         self.random_sleep().await;
@@ -274,29 +314,40 @@ impl BaseStrategy for OutlookRegisterStrategy {
         info!("Filling Birth Day: {}", user_info.birth_day);
         let day_val = user_info.birth_day.to_string();
 
-        // Try multiple selectors for Birth Day
-        // 1. ID: BirthDayDropdown
-        // 2. Name: BirthDay
-        // 3. Aria-label: "Birth day" or "出生日期"
-
-        let day_selectors = vec![
-            "#BirthDayDropdown",
-            "select[name=\"BirthDay\"]",
-            "select[aria-label=\"Birth day\"]",
-            "select[aria-label=\"出生日期\"]",
-        ];
-
-        let mut day_selected = false;
-        for selector in &day_selectors {
-            if let Ok(_) = adapter.select_option(selector, &day_val).await {
-                info!("Successfully selected day with selector: {}", selector);
-                day_selected = true;
-                break;
+        // 1. Click the dropdown button
+        if let Err(e) = adapter.click("#BirthDayDropdown").await {
+            warn!("Failed to click BirthDayDropdown: {}", e);
+            if let Err(e2) = adapter
+                .select_option("select[name=\"BirthDay\"]", &day_val)
+                .await
+            {
+                warn!("Fallback select day failed: {}", e2);
             }
-        }
+        } else {
+            tokio::time::sleep(Duration::from_millis(500)).await;
 
-        if !day_selected {
-            warn!("Failed to select day with all attempted selectors");
+            // 2. Click option
+            // let option_selector = format!("text={}", day_val);
+            // Since day is just a number usually (1, 2, ... 31), even in Chinese locale it might be just number or "1日".
+            // Codegen for day wasn't shown but likely similar.
+            let day_texts = vec![
+                day_val.clone(),          // 1
+                format!("{}日", day_val), // 1日
+            ];
+
+            let mut day_clicked = false;
+            for text in day_texts {
+                let loose_sel = format!("text={}", text);
+                if let Ok(_) = adapter.click(&loose_sel).await {
+                    info!("Clicked day option: {}", text);
+                    day_clicked = true;
+                    break;
+                }
+            }
+
+            if !day_clicked {
+                warn!("Failed to click any day option for value: {}", day_val);
+            }
         }
 
         self.random_sleep().await;
