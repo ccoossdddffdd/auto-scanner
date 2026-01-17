@@ -1,0 +1,20 @@
+# AdsPower 代理池配置示例
+# 
+# 格式说明：
+# - host: 代理服务器 IP 地址
+# - port: 代理端口
+# - type: 代理类型（http/https/socks5/ssh）
+# - username: 代理账号（可选）
+# - password: 代理密码（可选）
+# - refresh_url: 动态代理刷新 URL（可选）
+#
+# 使用方式：
+# 1. 将此文件复制为 proxies.csv
+# 2. 填写实际代理信息
+# 3. 在启动时指定环境变量：PROXY_POOL_PATH=./proxies.csv
+
+host,port,type,username,password,refresh_url
+192.168.1.100,8080,http,user1,pass123,http://api.proxy.com/refresh?id=1
+192.168.1.101,8080,socks5,user2,pass456,
+103.21.45.67,3128,https,,,
+45.77.123.45,1080,socks5,proxyuser,proxypass,http://proxy-api.com/change-ip?token=abc123

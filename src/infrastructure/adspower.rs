@@ -7,11 +7,13 @@ use crate::infrastructure::adspower::types::{
     CreateProfileRequest, FingerprintConfig, RandomUaConfig, UserProxyConfig,
 };
 use crate::infrastructure::browser_manager::BrowserEnvironmentManager;
+use crate::infrastructure::proxy_pool::ProxyPoolManager;
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashSet;
+use std::sync::Arc;
 use std::time::Duration;
 use tracing::{info, warn};
 
@@ -96,6 +98,7 @@ struct WebSocketInfo {
 pub struct AdsPowerClient {
     client: Client,
     config: AdsPowerConfig,
+    proxy_pool: Option<Arc<ProxyPoolManager>>,
 }
 
 impl AdsPowerClient {
@@ -107,7 +110,15 @@ impl AdsPowerClient {
                 .build()
                 .expect("创建 reqwest 客户端失败"),
             config,
+            proxy_pool: None,
         }
+    }
+
+    /// 配置代理池管理器
+    pub fn with_proxy_pool(mut self, proxy_pool: Arc<ProxyPoolManager>) -> Self {
+        info!("AdsPowerClient 已启用代理池管理");
+        self.proxy_pool = Some(proxy_pool);
+        self
     }
 
     /// 底层请求发送逻辑
@@ -339,11 +350,41 @@ impl AdsPowerClient {
         let default_config = ProfileConfig::default();
         let config = profile_config.unwrap_or(&default_config);
 
-        let proxyid = self
-            .config
-            .proxy_id
-            .clone()
-            .ok_or_else(|| AppError::Config("需要 ADSPOWER_PROXYID 配置".to_string()))?;
+        // 代理配置优先级：
+        // 1. 代理池动态分配（如果启用）
+        // 2. 环境变量 ADSPOWER_PROXYID（回退方案）
+        let (user_proxy_config, proxyid) = if let Some(pool) = &self.proxy_pool {
+            match pool.get_next().await {
+                Some(proxy_config) => {
+                    info!(
+                        "从代理池分配代理: {}:{}",
+                        proxy_config.proxy_host.as_ref().unwrap_or(&"unknown".to_string()),
+                        proxy_config.proxy_port.as_ref().unwrap_or(&"unknown".to_string())
+                    );
+                    (proxy_config, None)
+                }
+                None => {
+                    warn!("代理池无可用代理，回退到环境变量 ADSPOWER_PROXYID");
+                    let proxyid = self
+                        .config
+                        .proxy_id
+                        .clone()
+                        .ok_or_else(|| {
+                            AppError::Config(
+                                "代理池为空且缺少 ADSPOWER_PROXYID 配置".to_string(),
+                            )
+                        })?;
+                    (UserProxyConfig::with_proxyid(), Some(proxyid))
+                }
+            }
+        } else if let Some(proxy_id) = &self.config.proxy_id {
+            info!("使用环境变量配置的代理 ID: {}", proxy_id);
+            (UserProxyConfig::with_proxyid(), Some(proxy_id.clone()))
+        } else {
+            return Err(AppError::Config(
+                "未配置代理池且缺少 ADSPOWER_PROXYID 环境变量".to_string(),
+            ));
+        };
 
         let request = CreateProfileRequest {
             name: username.to_string(),
@@ -356,8 +397,82 @@ impl AdsPowerClient {
                     ua_system_version: vec![ua_system_version.to_string()],
                 },
             },
-            user_proxy_config: UserProxyConfig::default(),
-            proxyid: Some(proxyid),
+            user_proxy_config,
+            proxyid,
+        };
+
+        let resp: CreateProfileResponse = self
+            .call_api("POST", "/api/v1/user/create", Some(request))
+            .await?;
+
+        Ok(resp.id)
+    }
+
+    /// 为指定 Worker 创建配置文件（使用粘性代理分配）
+    pub async fn create_profile_for_worker(
+        &self,
+        username: &str,
+        worker_index: usize,
+        profile_config: Option<&ProfileConfig>,
+    ) -> AppResult<String> {
+        let ua_system_version = FingerprintGenerator::generate_random_system();
+
+        info!(
+            "正在为 Worker {} 创建配置文件 {}，UA 系统: {}",
+            worker_index, username, ua_system_version
+        );
+
+        let default_config = ProfileConfig::default();
+        let config = profile_config.unwrap_or(&default_config);
+
+        // 为 Worker 分配固定代理（粘性分配）
+        let (user_proxy_config, proxyid) = if let Some(pool) = &self.proxy_pool {
+            match pool.get_for_worker(worker_index).await {
+                Some(proxy_config) => {
+                    info!(
+                        "为 Worker {} 分配固定代理: {}:{}",
+                        worker_index,
+                        proxy_config.proxy_host.as_ref().unwrap_or(&"unknown".to_string()),
+                        proxy_config.proxy_port.as_ref().unwrap_or(&"unknown".to_string())
+                    );
+                    (proxy_config, None)
+                }
+                None => {
+                    warn!("代理池无可用代理，回退到环境变量 ADSPOWER_PROXYID");
+                    let proxyid = self
+                        .config
+                        .proxy_id
+                        .clone()
+                        .ok_or_else(|| {
+                            AppError::Config(
+                                "代理池为空且缺少 ADSPOWER_PROXYID 配置".to_string(),
+                            )
+                        })?;
+                    (UserProxyConfig::with_proxyid(), Some(proxyid))
+                }
+            }
+        } else if let Some(proxy_id) = &self.config.proxy_id {
+            info!("使用环境变量配置的代理 ID: {}", proxy_id);
+            (UserProxyConfig::with_proxyid(), Some(proxy_id.clone()))
+        } else {
+            return Err(AppError::Config(
+                "未配置代理池且缺少 ADSPOWER_PROXYID 环境变量".to_string(),
+            ));
+        };
+
+        let request = CreateProfileRequest {
+            name: username.to_string(),
+            group_id: config.group_id.clone(),
+            domain_name: config.domain_name.clone(),
+            open_urls: config.open_urls.clone(),
+            fingerprint_config: FingerprintConfig {
+                random_ua: RandomUaConfig {
+                    ua_browser: vec!["chrome".to_string()],
+                    ua_system_version: vec![ua_system_version.to_string()],
+                },
+            },
+            user_proxy_config,
+            proxyid,
         };
 
         let resp: CreateProfileResponse = self

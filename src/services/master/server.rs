@@ -200,6 +200,66 @@ impl FileProcessingHandler {
     }
 }
 
+/// 跨平台信号处理器
+/// 在 Unix 上监听 SIGTERM 和 SIGINT
+/// 在 Windows 上监听 Ctrl+C 和 Ctrl+Break
+struct ShutdownSignal {
+    #[cfg(unix)]
+    sigterm: tokio::signal::unix::Signal,
+    #[cfg(unix)]
+    sigint: tokio::signal::unix::Signal,
+    #[cfg(windows)]
+    ctrl_c: tokio::signal::windows::CtrlC,
+    #[cfg(windows)]
+    ctrl_break: tokio::signal::windows::CtrlBreak,
+}
+
+impl ShutdownSignal {
+    #[cfg(unix)]
+    fn new() -> Result<Self> {
+        Ok(Self {
+            sigterm: tokio::signal::unix::signal(
+                tokio::signal::unix::SignalKind::terminate()
+            )?,
+            sigint: tokio::signal::unix::signal(
+                tokio::signal::unix::SignalKind::interrupt()
+            )?,
+        })
+    }
+
+    #[cfg(windows)]
+    fn new() -> Result<Self> {
+        Ok(Self {
+            ctrl_c: tokio::signal::windows::ctrl_c()?,
+            ctrl_break: tokio::signal::windows::ctrl_break()?,
+        })
+    }
+
+    #[cfg(unix)]
+    async fn recv(&mut self) {
+        tokio::select! {
+            _ = self.sigterm.recv() => {
+                info!("收到 SIGTERM 信号");
+            }
+            _ = self.sigint.recv() => {
+                info!("收到 SIGINT 信号");
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    async fn recv(&mut self) {
+        tokio::select! {
+            _ = self.ctrl_c.recv() => {
+                info!("收到 Ctrl+C 信号");
+            }
+            _ = self.ctrl_break.recv() => {
+                info!("收到 Ctrl+Break 信号");
+            }
+        }
+    }
+}
+
 pub struct MasterServer {
     config: AppConfig,
 }
@@ -284,18 +344,13 @@ impl MasterServer {
 
         info!("等待新文件...");
 
-        let mut sigterm =
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
-        let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
+        // 创建跨平台的关闭信号处理器
+        let mut shutdown = ShutdownSignal::new()?;
 
         loop {
             tokio::select! {
-                _ = sigterm.recv() => {
-                    info!("收到 SIGTERM，正在关闭...");
-                    break;
-                }
-                _ = sigint.recv() => {
-                    info!("收到 SIGINT，正在关闭...");
+                _ = shutdown.recv() => {
+                    info!("正在关闭 Master 服务...");
                     break;
                 }
                 Some(path) = rx.recv() => {

@@ -4,100 +4,219 @@
 
 Auto Scanner 是一个高性能、异步的 Rust 应用程序，专为自动化浏览器交互而设计。它采用 **Master-Worker 架构** 来高效处理任务，同时支持本地执行（通过 Playwright）和指纹浏览器集成（通过 AdsPower）。
 
-系统基于“文件驱动”和“邮件触发”模式运行：它监控目录中的输入文件（CSV/Excel）或通过电子邮件接收文件，利用浏览器自动化并发处理账号，并输出结果。
+系统基于"文件驱动"和"邮件触发"模式运行：它监控目录中的输入文件（CSV/Excel）或通过电子邮件接收文件，利用浏览器自动化并发处理账号，并输出结果。
 
-## 2. 架构图谱
+## 2. 构建与测试命令
 
-代码库遵循清晰的分层架构：
+### 构建命令
+```bash
+cargo build              # Debug 构建
+cargo build --release    # Release 构建（优化）
+cargo check              # 快速检查代码
+```
 
-- **`src/core/`**: 领域模型和共享工具。
-    - `cli.rs`: 命令行接口定义（Master/Worker 模式）。
-    - `models.rs`: 核心数据结构（`Account`, `WorkerResult`）。
+### 测试命令
+```bash
+cargo test                              # 运行所有测试（单元测试 + 集成测试）
+cargo test --lib                        # 仅运行单元测试
+cargo test --test integration_test      # 运行特定集成测试
+cargo test --test outlook_register_test  # 运行 Outlook 注册测试
+```
 
-- **`src/infrastructure/`**: 外部系统交互的实现。
-    - `browser/`: 浏览器自动化适配器（`BrowserAdapter` trait），将逻辑与具体驱动（Playwright/Mock）解耦。
-    - `adspower.rs`: 健壮的 AdsPower API 客户端（环境管理、浏览器控制）。
-    - `imap.rs`: 邮件协议处理。
-    - `process.rs` & `daemon.rs`: 系统级进程管理。
+#### 运行单个测试
+```bash
+cargo test test_account_creation                    # 按名称运行测试
+cargo test test_account_creation --exact             # 精确匹配测试名称
+cargo test test_cli_master_mode --exact              # 运行特定 CLI 测试
+cargo test test_outlook_register_complete_flow --test outlook_register_test  # 在特定测试文件中运行
+```
 
-- **`src/services/`**: 业务逻辑与编排。
-    - `master.rs`: 中枢神经系统。负责文件监控（`notify`）、并发控制（`permit` 通道）和生命周期管理。
-    - `worker/`: Worker 进程逻辑（`coordinator.rs`, `runner.rs`）。
-    - `email/`: 端到端邮件监控、解析和通知服务。
-    - `processor.rs`: 连接 Master 和 Worker，处理文件 I/O 和结果聚合。
+#### 调试测试
+```bash
+cargo test -- --nocapture          # 显示测试输出
+cargo test -- --show-output        # 显示所有测试输出
+RUST_LOG=debug cargo test          # 启用调试日志
+```
 
-- **`src/strategies/`**: 可插拔的自动化策略。
-    - `facebook/`: 实现 `LoginStrategy`。包含登录、处理 2FA/验证码以及提取数据的逻辑。
-        - `mod.rs`: 主逻辑。
-        - `constants.rs`: 集中管理的配置，包含选择器、超时设置和关键词。
+### Lint 与格式化
+```bash
+cargo clippy                          # 运行 Clippy 检查
+cargo clippy --all-targets            # 检查所有目标
+cargo clippy --fix                    # 自动修复警告
+cargo fmt                             # 格式化代码
+cargo fmt --check                     # 检查格式（不修改）
+```
 
-## 3. 核心工作流
+### 开发脚本
+```bash
+./scripts/test.sh    # 运行完整测试套件（单元 + 集成）
+./scripts/start.sh   # 构建并启动守护进程
+./scripts/stop.sh    # 停止守护进程
+./scripts/status.sh   # 检查守护进程状态
+```
 
-### 3.1. 文件处理流水线
+## 3. 代码风格与规范
 
-1.  **检测**: `Master` 检测到 `INPUT_DIR` 中的新文件（通过 `notify`）。
-2.  **解析**: `csv_reader` 或 `excel_handler` 将文件解析为 `Vec<Account>`。
-3.  **分发**: 根据可用的线程许可，将账号分发给 `WorkerCoordinator`。
-4.  **执行**:
-    - 启动一个 Worker 进程。
-    - 如果使用 AdsPower，创建/检索唯一的浏览器环境。
-    - `FacebookLoginStrategy` 执行自动化任务。
-5.  **聚合**: 收集结果并回写到文件。
-6.  **收尾**: 处理后的文件移动到 `DONED_DIR`。
+### 3.1 导入组织
+```rust
+// 1. 外部 crate 导入（按字母顺序）
+use anyhow::{Context, Result};
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc;
 
-### 3.2. 邮件自动化流程
+// 2. 内部 crate 导入（按层级组织）
+use crate::core::models::{Account, WorkerResult};
+use crate::infrastructure::browser::BrowserAdapter;
 
-1.  **监控**: `EmailMonitor` 通过 IMAP 轮询收件箱。
-2.  **触发**: 发现匹配的邮件后，下载附件到 `INPUT_DIR`。
-3.  **处理**: 标准文件处理流水线 (3.1) 接管。
-4.  **回复**: 处理完成后，`EmailNotification` 将结果文件作为附件回复给发送者。
+// 3. 模块本地导入
+use super::BaseStrategy;
+use constants::FacebookConfig;
+```
 
-## 4. 开发指南
+### 3.2 类型定义与命名约定
 
-### 4.1. 代码风格与规范
+**Structs: `PascalCase`**
+```rust
+pub struct FacebookLoginStrategy { /* ... */ }
+pub struct Account { /* ... */ }
+```
 
-- **异步优先**: 项目大量使用异步（`tokio`）。避免在异步上下文中进行阻塞操作。
-- **错误处理**: 使用 `anyhow::Result` 处理应用级错误。使用 `.context()` 提供上下文。
-    - _规则_: 严禁在生产代码中使用 `.unwrap()`。使用 `match` 或 `?` 优雅地处理错误。
-- **配置管理**:
-    - 使用 `src/strategies/facebook/constants.rs` 管理策略相关的常量（选择器、关键词）。
-    - 使用 `.env` 和 `clap`（CLI 参数）进行系统配置。
-- **Strategy Pattern**: Implement the `BaseStrategy` trait for different automation logic (e.g., `FacebookLoginStrategy`, `TwitterFollowStrategy`).
-- **Worker Isolation**: Each worker runs in its own process, managed by the Master.
-- **Dynamic Configuration**: Strategies can be selected at runtime via CLI arguments.
+**Enums: `PascalCase`**
+```rust
+pub enum AppError { /* ... */ }
+pub enum WorkerStrategy { FacebookLogin, OutlookRegister }
+```
 
-### 4.2. 添加新策略
+**Functions: `snake_case`**
+```rust
+pub async fn spawn_worker(&self, index: usize) -> AppResult<()>
+fn perform_login(&self, adapter: &dyn BrowserAdapter) -> Result<()>
+```
 
-1.  在 `src/strategies/` 中创建一个新模块。
-2.  实现 `LoginStrategy` trait。
-3.  定义选择器/常量的配置结构体。
-4.  在 `src/services/worker/runner.rs` 中注册策略。
+**Constants: `SCREAMING_SNAKE_CASE`**
+```rust
+const INPUT_DIR: &str = "input";
+const PID_FILE: &str = "auto-scanner.pid";
+```
 
-### 4.3. 与 AdsPower 协作
+**Type Aliases: `PascalCase` + `Result`**
+```rust
+pub type AppResult<T> = Result<T, AppError>;
+pub type UnitResult = AppResult<()>;
+```
 
-- `AdsPowerClient` (`src/infrastructure/adspower.rs`) 设计得非常健壮。
-- 它处理速率限制和连接检查。
-- **重要**: 添加新的 AdsPower 功能时，确保处理好生命周期（创建 -> 启动 -> 停止 -> 删除），以防止资源泄露（僵尸环境）。
+### 3.3 错误处理
+```rust
+// 业务逻辑使用 anyhow::Result
+use anyhow::{Context, Result};
 
-## 5. 配置参考
+async fn perform_login(&self, account: &Account) -> Result<()> {
+    adapter.navigate(&url)
+        .await
+        .context("导航到登录页失败")?;
+    Ok(())
+}
 
-### 环境变量
+// 基础设施错误使用自定义 AppError
+#[derive(Error, Debug)]
+pub enum AppError {
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Configuration error: {0}")]
+    Config(String),
+}
 
-- `INPUT_DIR`: 监控输入文件的目录。
-- `DONED_DIR`: 处理后文件的存放目录。
-- `ADSPOWER_API_URL`: 本地 AdsPower API 的 URL（默认：`http://127.0.0.1:50325`）。
-- `ADSPOWER_API_KEY`: AdsPower 的 API Key。
-- `ADSPOWER_PROXYID`: 用于创建环境的代理 ID。
+// 严禁在生产代码中使用 .unwrap()
+// 错误示例：let result = some_operation().unwrap();  // ❌
+// 正确示例：let result = some_operation().context("...")?;  // ✅
+```
 
-### 策略配置
+### 3.4 异步模式
+```rust
+// 所有 I/O 操作使用 async/await
+pub async fn run(self) -> AppResult<()> {
+    tokio::spawn(async move {
+        coord.spawn_worker(index, &account).await
+    });
 
-参见 `src/strategies/facebook/constants.rs` 中的可修改值，包括：
+    tokio::select! {
+        _ = sigterm.recv() => {
+            info!("收到 SIGTERM，正在关闭...");
+            break;
+        }
+        Some(path) = rx.recv() => {
+            // 处理文件
+        }
+    }
 
-- `timeouts`: 登录和页面加载等待时间。
-- `selectors`: 登录表单、指示器和错误信息的 CSS 选择器。
-- `keywords`: 用于检测验证码、锁定和密码错误的多语言列表。
+    Ok(())
+}
 
-## 6. 测试
+// trait 实现使用 #[async_trait]
+#[async_trait]
+impl BaseStrategy for FacebookLoginStrategy {
+    async fn run(&self, adapter: &dyn BrowserAdapter, account: &Account) -> Result<WorkerResult> {
+        // ...
+    }
+}
+```
 
-- **单元测试**: 运行 `cargo test` 执行位于源模块内的单元测试。
-- **集成测试**: 运行 `cargo test --test integration_test` 执行完整的端到端工作流测试（使用 Mock 后端）。
+### 3.5 测试约定
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_account_creation() {
+        // Arrange-Act-Assert 模式
+        let account = Account::new("test@example.com".to_string(), "pass".to_string());
+        assert_eq!(account.username, "test@example.com");
+    }
+
+    #[tokio::test]
+    async fn test_async_operation() {
+        let strategy = OutlookRegisterStrategy::new();
+        let result = strategy.run(&adapter, &account).await;
+        assert!(result.is_ok(), "策略执行失败: {:?}", result);
+    }
+}
+```
+
+### 3.6 文档与注释
+```rust
+/// 描述性文档注释
+pub async fn navigate(&self, url: &str) -> Result<(), BrowserError> {
+    // TODO: Replace fixed sleep with dynamic wait in future refactoring
+    tokio::time::sleep(Duration::from_secs(8)).await;
+}
+
+// 使用 tracing 而非 println!
+use tracing::{info, warn, error, debug};
+info!("Master 已启动。监控目录: {}", self.config.input_dir);
+```
+
+## 4. 架构图谱
+
+- **`src/core/`**: 领域模型和共享工具（`cli.rs`, `models.rs`, `error.rs`）
+- **`src/infrastructure/`**: 外部系统交互（`browser/`, `adspower.rs`, `imap.rs`）
+- **`src/services/`**: 业务逻辑与编排（`master/`, `worker/`, `email/`）
+- **`src/strategies/`**: 可插拔自动化策略（`facebook_login/`, `outlook_register/`）
+
+## 5. 环境变量
+
+- `INPUT_DIR`: 监控输入文件的目录
+- `DONED_DIR`: 处理后文件的存放目录
+- `ADSPOWER_API_URL`: AdsPower API URL（默认：`http://127.0.0.1:50325`）
+- `ADSPOWER_API_KEY`: AdsPower 认证密钥
+- `ADSPOWER_PROXYID`: 代理 ID
+
+## 6. 测试文件结构
+
+**单元测试**（在源模块中）：`src/core/models.rs`, `src/services/email/tracker.rs`
+**集成测试**（在 `tests/` 目录）：`tests/integration_test.rs`, `tests/outlook_register_test.rs`
+
+**Mock 实现**：
+- `MockBrowserAdapter`: 浏览器自动化模拟
+- `MockTimeProvider`: 时间提供者模拟（用于时间依赖逻辑）

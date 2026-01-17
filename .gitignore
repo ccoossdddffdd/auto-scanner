@@ -14,3 +14,7 @@ d-input
 *.pid
 *.csv
 .aider*
+
+# 代理池配置（包含敏感信息）
+proxies.csv
+proxy_pool.csv
