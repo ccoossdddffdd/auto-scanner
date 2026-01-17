@@ -1,5 +1,6 @@
 use crate::core::config::AppConfig;
 use crate::infrastructure::adspower::AdsPowerClient;
+use crate::infrastructure::bitbrowser::BitBrowserClient;
 use crate::infrastructure::browser_manager::BrowserEnvironmentManager;
 use crate::infrastructure::process::PidManager;
 use crate::services::email::tracker::FileTracker;
@@ -36,7 +37,7 @@ pub struct RuntimeState {
 }
 
 pub struct ServiceContainer {
-    pub adspower: Option<Arc<dyn BrowserEnvironmentManager>>,
+    pub browser_manager: Option<Arc<dyn BrowserEnvironmentManager>>,
     pub email_monitor: Option<Arc<EmailMonitor>>,
 }
 
@@ -53,7 +54,7 @@ impl MasterContext {
             std::env::var("DONED_DIR").unwrap_or_else(|_| "input/doned".to_string());
         let doned_dir = Self::ensure_dir(&doned_dir_str, "doned")?;
 
-        let adspower = Self::create_adspower_client(config)?;
+        let browser_manager = Self::create_browser_client(config)?;
         let email_monitor = Self::initialize_email_monitor(config).await;
 
         let (permit_tx, permit_rx) = async_channel::bounded(config.master.thread_count);
@@ -77,7 +78,7 @@ impl MasterContext {
                 scheduler: JobScheduler::new(),
             },
             services: ServiceContainer {
-                adspower,
+                browser_manager,
                 email_monitor,
             },
         })
@@ -91,14 +92,20 @@ impl MasterContext {
         Ok(path)
     }
 
-    fn create_adspower_client(
+    fn create_browser_client(
         config: &AppConfig,
     ) -> Result<Option<Arc<dyn BrowserEnvironmentManager>>> {
-        if config.master.backend == "adspower" {
-            let adspower_config = config.adspower.clone().context("AdsPower 配置缺失")?;
-            Ok(Some(Arc::new(AdsPowerClient::new(adspower_config))))
-        } else {
-            Ok(None)
+        match config.master.backend.as_str() {
+            "adspower" => {
+                let adspower_config = config.adspower.clone().context("AdsPower 配置缺失")?;
+                Ok(Some(Arc::new(AdsPowerClient::new(adspower_config))))
+            }
+            "bitbrowser" => {
+                let bitbrowser_config =
+                    config.bitbrowser.clone().context("BitBrowser 配置缺失")?;
+                Ok(Some(Arc::new(BitBrowserClient::new(bitbrowser_config))))
+            }
+            _ => Ok(None),
         }
     }
 
@@ -184,7 +191,7 @@ impl FileProcessingHandler {
         let browser_config = BrowserConfig {
             backend: self.config.backend.clone(),
             remote_url: self.config.remote_url.clone(),
-            adspower: self.context.services.adspower.clone(),
+            browser_manager: self.context.services.browser_manager.clone(),
         };
 
         let worker_config = WorkerConfig {
@@ -373,31 +380,43 @@ impl MasterServer {
             return Ok(());
         }
 
-        if self.config.master.backend == "adspower" {
-            let adspower_config = self.config.adspower.clone().context("AdsPower 配置缺失")?;
-            let client = AdsPowerClient::new(adspower_config);
-            client.check_connectivity().await?;
-            info!("AdsPower API 可达");
-        } else {
-            let url_str = if self.config.master.remote_url.is_empty() {
-                "http://127.0.0.1:9222"
-            } else {
-                &self.config.master.remote_url
-            };
+        match self.config.master.backend.as_str() {
+            "adspower" => {
+                let adspower_config =
+                    self.config.adspower.clone().context("AdsPower 配置缺失")?;
+                let client = AdsPowerClient::new(adspower_config);
+                client.check_connectivity().await?;
+                info!("AdsPower API 可达");
+            }
+            "bitbrowser" => {
+                let bitbrowser_config =
+                    self.config.bitbrowser.clone().context("BitBrowser 配置缺失")?;
+                let client = BitBrowserClient::new(bitbrowser_config);
+                client.check_connectivity().await?;
+                info!("BitBrowser API 可达");
+            }
+            _ => {
+                let url_str = if self.config.master.remote_url.is_empty() {
+                    "http://127.0.0.1:9222"
+                } else {
+                    &self.config.master.remote_url
+                };
 
-            let url = Url::parse(url_str).context(format!("解析 remote_url 失败: {}", url_str))?;
+                let url =
+                    Url::parse(url_str).context(format!("解析 remote_url 失败: {}", url_str))?;
 
-            let host = url.host_str().unwrap_or("127.0.0.1");
-            let port = url.port_or_known_default().unwrap_or(9222);
+                let host = url.host_str().unwrap_or("127.0.0.1");
+                let port = url.port_or_known_default().unwrap_or(9222);
 
-            let addr = format!("{}:{}", host, port);
-            info!("测试连接到 {}", addr);
+                let addr = format!("{}:{}", host, port);
+                info!("测试连接到 {}", addr);
 
-            TcpStream::connect(&addr)
-                .await
-                .with_context(|| format!("连接到浏览器 {} 失败", addr))?;
+                TcpStream::connect(&addr)
+                    .await
+                    .with_context(|| format!("连接到浏览器 {} 失败", addr))?;
 
-            info!("成功连接到浏览器 {}", addr);
+                info!("成功连接到浏览器 {}", addr);
+            }
         }
 
         Ok(())

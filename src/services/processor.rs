@@ -14,7 +14,7 @@ use tracing::{error, info, warn};
 pub struct BrowserConfig {
     pub backend: String,
     pub remote_url: String,
-    pub adspower: Option<Arc<dyn BrowserEnvironmentManager>>,
+    pub browser_manager: Option<Arc<dyn BrowserEnvironmentManager>>,
 }
 
 /// Worker 配置
@@ -160,7 +160,7 @@ async fn process_accounts(
     let coordinator = WorkerCoordinator::new(
         permit_rx,
         permit_tx,
-        config.browser.adspower.clone(),
+        config.browser.browser_manager.clone(),
         config.worker.exe_path.clone(),
         config.browser.backend.clone(),
         config.browser.remote_url.clone(),

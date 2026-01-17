@@ -13,8 +13,8 @@ use std::sync::Arc;
 use tokio::process::Command;
 use tracing::{error, info};
 
-/// AdsPower 会话信息
-struct AdsPowerSession {
+/// 浏览器会话信息
+struct BrowserSession {
     profile_id: String,
     ws_url: String,
 }
@@ -23,7 +23,7 @@ struct AdsPowerSession {
 pub struct WorkerCoordinator {
     pub permit_rx: async_channel::Receiver<usize>,
     pub permit_tx: async_channel::Sender<usize>,
-    pub adspower: Option<Arc<dyn BrowserEnvironmentManager>>,
+    pub browser_manager: Option<Arc<dyn BrowserEnvironmentManager>>,
     pub exe_path: PathBuf,
     pub backend: String,
     pub remote_url: String,
@@ -36,7 +36,7 @@ impl WorkerCoordinator {
     pub fn new(
         permit_rx: async_channel::Receiver<usize>,
         permit_tx: async_channel::Sender<usize>,
-        adspower: Option<Arc<dyn BrowserEnvironmentManager>>,
+        browser_manager: Option<Arc<dyn BrowserEnvironmentManager>>,
         exe_path: PathBuf,
         backend: String,
         remote_url: String,
@@ -45,7 +45,7 @@ impl WorkerCoordinator {
         Self {
             permit_rx,
             permit_tx,
-            adspower,
+            browser_manager,
             exe_path,
             backend,
             remote_url,
@@ -72,11 +72,11 @@ impl WorkerCoordinator {
 
         let mut session = None;
 
-        // AdsPower Mode: If session preparation fails, we MUST fail the task.
-        // Fallback to default remote_url is dangerous if AdsPower was explicitly requested.
-        let remote_url = if self.adspower.is_some() {
+        // Browser Manager Mode: If session preparation fails, we MUST fail the task.
+        // Fallback to default remote_url is dangerous if a browser manager was explicitly requested.
+        let remote_url = if self.browser_manager.is_some() {
             match self
-                .prepare_adspower_session(thread_index, &account.username)
+                .prepare_browser_session(thread_index, &account.username)
                 .await
             {
                 Some(s) => {
@@ -85,7 +85,7 @@ impl WorkerCoordinator {
                     url
                 }
                 None => {
-                    error!("{} 的 AdsPower 会话准备失败，终止 Worker", account.username);
+                    error!("{} 的浏览器会话准备失败，终止 Worker", account.username);
                     self.cleanup_session(None, thread_index).await;
                     return (index, None);
                 }
@@ -110,13 +110,13 @@ impl WorkerCoordinator {
             .map_err(|e| anyhow::anyhow!("获取线程槽位失败: {}", e))
     }
 
-    /// 准备 AdsPower 会话
-    async fn prepare_adspower_session(
+    /// 准备浏览器会话
+    async fn prepare_browser_session(
         &self,
         thread_index: usize,
         username: &str,
-    ) -> Option<AdsPowerSession> {
-        let client = self.adspower.as_ref()?;
+    ) -> Option<BrowserSession> {
+        let client = self.browser_manager.as_ref()?;
 
         // 使用策略提供者获取配置，消除硬编码
         let profile_config = self.strategy_provider.get_profile_config(&self.strategy);
@@ -127,20 +127,20 @@ impl WorkerCoordinator {
         {
             Ok(id) => id,
             Err(e) => {
-                error!("确保线程 {} 的 AdsPower 配置文件失败: {}", thread_index, e);
+                error!("确保线程 {} 的浏览器配置文件失败: {}", thread_index, e);
                 return None;
             }
         };
 
         info!(
-            "线程 {}: 账号 {} 使用 AdsPower 配置文件 {}",
+            "线程 {}: 账号 {} 使用浏览器配置文件 {}",
             thread_index, username, profile_id
         );
 
         match client.start_browser(&profile_id).await {
-            Ok(ws_url) => Some(AdsPowerSession { profile_id, ws_url }),
+            Ok(ws_url) => Some(BrowserSession { profile_id, ws_url }),
             Err(e) => {
-                error!("启动 {} 的 AdsPower 浏览器失败: {}", username, e);
+                error!("启动 {} 的浏览器失败: {}", username, e);
                 None
             }
         }
@@ -177,16 +177,16 @@ impl WorkerCoordinator {
     }
 
     /// 清理会话资源
-    async fn cleanup_session(&self, session: Option<AdsPowerSession>, thread_index: usize) {
-        if let (Some(client), Some(sess)) = (&self.adspower, session) {
+    async fn cleanup_session(&self, session: Option<BrowserSession>, thread_index: usize) {
+        if let (Some(client), Some(sess)) = (&self.browser_manager, session) {
             // Stop the browser first
             if let Err(e) = client.stop_browser(&sess.profile_id).await {
-                error!("停止 AdsPower 浏览器失败: {}", e);
+                error!("停止浏览器失败: {}", e);
             }
 
             // Delete the profile to ensure clean state for next run
             if let Err(e) = client.delete_profile(&sess.profile_id).await {
-                error!("删除 AdsPower 配置文件 {} 失败: {}", sess.profile_id, e);
+                error!("删除浏览器配置文件 {} 失败: {}", sess.profile_id, e);
             }
         }
 

@@ -1,4 +1,5 @@
 pub mod adspower;
+pub mod bitbrowser;
 pub mod browser;
 pub mod browser_manager;
 pub mod daemon;

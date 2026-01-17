@@ -21,7 +21,7 @@ pub async fn run(
     let account = Account::new(username.clone(), password);
 
     let adapter_result: Result<Box<dyn BrowserAdapter>> = match backend.as_str() {
-        "playwright" | "cdp" | "adspower" => match PlaywrightAdapter::new(&remote_url).await {
+        "playwright" | "cdp" | "adspower" | "bitbrowser" => match PlaywrightAdapter::new(&remote_url).await {
             Ok(adapter) => Ok(Box::new(adapter)),
             Err(e) => Err(anyhow::anyhow!("初始化 Playwright 适配器失败: {}", e)),
         },

@@ -117,7 +117,7 @@ impl RegistrationLoopHandler {
         Arc::new(WorkerCoordinator::new(
             self.context.state.permit_rx.clone(),
             self.context.state.permit_tx.clone(),
-            self.context.services.adspower.clone(),
+            self.context.services.browser_manager.clone(),
             self.context.state.exe_path.clone(),
             self.config.backend.clone(),
             self.config.remote_url.clone(),

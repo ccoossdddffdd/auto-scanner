@@ -1,4 +1,5 @@
 use crate::infrastructure::adspower::AdsPowerConfig;
+use crate::infrastructure::bitbrowser::BitBrowserConfig;
 use crate::services::email::EmailConfig;
 use crate::services::master::MasterConfig;
 use anyhow::{Context, Result};
@@ -8,6 +9,7 @@ use std::env;
 pub struct AppConfig {
     pub master: MasterConfig,
     pub adspower: Option<AdsPowerConfig>,
+    pub bitbrowser: Option<BitBrowserConfig>,
     pub email: Option<EmailConfig>,
     pub input_dir: String,
 }
@@ -18,11 +20,13 @@ impl AppConfig {
         master: MasterConfig,
         input_dir: String,
         adspower: Option<AdsPowerConfig>,
+        bitbrowser: Option<BitBrowserConfig>,
         email: Option<EmailConfig>,
     ) -> Self {
         Self {
             master,
             adspower,
+            bitbrowser,
             email,
             input_dir,
         }
@@ -37,6 +41,12 @@ impl AppConfig {
 
         let adspower = if master.backend == "adspower" {
             Some(AdsPowerConfig::from_env()?)
+        } else {
+            None
+        };
+
+        let bitbrowser = if master.backend == "bitbrowser" {
+            Some(BitBrowserConfig::from_env()?)
         } else {
             None
         };
@@ -56,6 +66,7 @@ impl AppConfig {
         Ok(Self {
             master,
             adspower,
+            bitbrowser,
             email,
             input_dir,
         })
