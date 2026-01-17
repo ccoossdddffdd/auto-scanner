@@ -332,6 +332,32 @@ impl BaseStrategy for OutlookRegisterStrategy {
             .context("Clicking Next after name")?;
         self.random_sleep().await;
 
+        // Final verification check
+        // We expect to land on the captcha page or verification page.
+        // If we are still on a page with "FirstName" input or "LastName", it means failure.
+        // Or check for error messages.
+
+        let has_error = if let Ok(true) = adapter.is_visible(".alert-error").await {
+            true
+        } else if let Ok(true) = adapter.is_visible(".error").await {
+            true
+        } else if let Ok(true) = adapter.is_visible("div[aria-live='assertive']").await {
+            // MS often uses aria-live for errors
+            true
+        } else {
+            false
+        };
+
+        if has_error {
+            // Try to grab error text
+            let error_text = adapter
+                .get_text("div[aria-live='assertive']")
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            warn!("Registration flow failed with error: {}", error_text);
+            return Err(anyhow::anyhow!("Registration flow failed: {}", error_text));
+        }
+
         // Construct result
         let mut data = serde_json::Map::new();
         data.insert(
