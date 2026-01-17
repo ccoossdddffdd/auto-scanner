@@ -67,4 +67,7 @@ pub trait BrowserAdapter: Send + Sync {
 
     /// Select an option in a select element
     async fn select_option(&self, selector: &str, value: &str) -> Result<(), BrowserError>;
+
+    /// Get full page content (HTML)
+    async fn get_content(&self) -> Result<String, BrowserError>;
 }

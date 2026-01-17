@@ -301,4 +301,11 @@ impl BrowserAdapter for PlaywrightAdapter {
             })?;
         Ok(())
     }
+
+    async fn get_content(&self) -> Result<String, BrowserError> {
+        self.page
+            .content()
+            .await
+            .map_err(|e| BrowserError::Other(format!("获取页面内容失败: {}", e)))
+    }
 }

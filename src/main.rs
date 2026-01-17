@@ -22,6 +22,7 @@ fn main() -> Result<()> {
             status,
             enable_email_monitor,
             email_poll_interval,
+            register_count,
         } => {
             if daemon && !stop && !status {
                 start_daemon(PID_FILE, "logs/auto-scanner.out", "logs/auto-scanner.err")?;
@@ -39,6 +40,7 @@ fn main() -> Result<()> {
                 enable_email_monitor,
                 email_poll_interval,
                 exe_path: None,
+                register_count,
             };
 
             // 初始化日志（需要先于配置加载，以便记录配置加载过程中的警告）

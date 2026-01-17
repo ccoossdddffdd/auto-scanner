@@ -13,3 +13,4 @@ d-input
 
 *.pid
 *.csv
+.aider*

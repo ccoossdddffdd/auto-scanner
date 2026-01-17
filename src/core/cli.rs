@@ -47,6 +47,10 @@ pub enum Commands {
         /// 邮件轮询间隔（秒）
         #[arg(long, default_value = "60")]
         email_poll_interval: u64,
+
+        /// Outlook 注册策略的总注册数量（0 表示无限循环）
+        #[arg(long, default_value = "0")]
+        register_count: usize,
     },
     /// 以 Worker 模式运行，执行单个任务（通常由 Master 调用）
     Worker {

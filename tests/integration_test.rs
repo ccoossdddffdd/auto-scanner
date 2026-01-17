@@ -56,6 +56,7 @@ async fn test_end_to_end_workflow() {
         enable_email_monitor: false,
         email_poll_interval: 60,
         exe_path: Some(PathBuf::from("target/debug/auto-scanner")),
+        register_count: 0,
     };
 
     // 5. Run Master in a separate task

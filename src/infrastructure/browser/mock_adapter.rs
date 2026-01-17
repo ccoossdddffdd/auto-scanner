@@ -108,4 +108,9 @@ impl BrowserAdapter for MockBrowserAdapter {
         info!("[Mock] Selecting option '{}' in {}", value, selector);
         Ok(())
     }
+
+    async fn get_content(&self) -> Result<String, BrowserError> {
+        info!("[Mock] Getting page content");
+        Ok("<html><body>Mock page content</body></html>".to_string())
+    }
 }

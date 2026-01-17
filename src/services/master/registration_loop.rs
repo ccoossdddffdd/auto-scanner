@@ -7,7 +7,6 @@ use chrono::Local;
 use std::sync::Arc;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
-use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
 pub struct RegistrationLoopHandler {
@@ -33,60 +32,76 @@ impl RegistrationLoopHandler {
 
     // Alternative: Just spawn `thread_count` long-running loops.
     pub async fn run_continuously(&self) {
+        let register_count = self.config.register_count;
+        
+        // 判断运行模式
+        if register_count == 0 {
+            info!("无限循环模式：将持续注册账号");
+        } else {
+            info!("限定数量模式：将注册 {} 个账号后退出", register_count);
+        }
+
         let mut handles = Vec::new();
-        // Add a global lock to serialize tasks
-        let global_lock = Arc::new(Mutex::new(()));
 
         for _ in 0..self.config.thread_count {
             let coordinator = self.create_coordinator();
             let context = self.context.clone();
-            // let config = self.config.clone();
-            let lock = global_lock.clone();
+            let count = register_count;
 
             let handle = tokio::spawn(async move {
+                let mut registered = 0;
+                
+                // 初始延迟，避免 AdsPower API 速率限制
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                
                 loop {
-                    // Coordinator internal acquire_thread will block if no permits.
-                    // But permits are owned by the coordinator instance?
-                    // No, permit_rx is shared.
-                    // BUT, if we spawn N loops, and each calls spawn_worker,
-                    // spawn_worker will try to recv from rx.
-                    // The rx is filled with N tokens initially.
-                    // So each loop will grab one, run, release, and grab again.
-                    // This is exactly what we want.
-
                     let dummy_account =
                         Account::new("new_user".to_string(), "password".to_string());
 
-                    // Acquire global lock to ensure only one registration happens at a time
-                    let _guard = lock.lock().await;
-                    let (_, result) = coordinator.spawn_worker(0, &dummy_account).await;
-                    drop(_guard); // Release lock immediately after task completes
+                    // No global lock needed; coordinator handles concurrency via permits
+                    let (_, result) = coordinator.spawn_worker(registered, &dummy_account).await;
 
                     if let Some(res) = result {
                         // The strategy returns "处理中" for now as success placeholder
                         if res.status == "成功" || res.status == "处理中" {
-                            info!("注册流程完成: {:?}", res);
+                            registered += 1;
+                            info!("注册流程完成 ({}/{}): {:?}", 
+                                  registered, 
+                                  if count == 0 { "∞".to_string() } else { count.to_string() },
+                                  res);
+                            
                             let date_str = Local::now().format("%Y%m%d").to_string();
-                            // User asked for xlsx, but we use csv for robustness and simplicity in append mode
                             let filename = format!("outlook_register_{}.csv", date_str);
                             let file_path = context.state.doned_dir.join(filename);
 
                             if let Err(e) = Self::save_result(&file_path, res).await {
                                 error!("保存结果失败: {}", e);
                             }
+                            
+                            // 检查是否达到目标数量
+                            if count > 0 && registered >= count {
+                                info!("已完成 {} 个账号注册，程序将退出", registered);
+                                std::process::exit(0);
+                            }
                         } else {
                             warn!("注册流程未能完成: {}", res.message);
                         }
                     }
 
-                    // Brief pause to prevent tight loop in case of immediate errors
-                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    // 如果是无限循环模式，继续下一次
+                    if count == 0 {
+                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                        continue;
+                    }
+                    
+                    // 限定数量模式，每次循环都延迟
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 }
             });
             handles.push(handle);
         }
 
-        // Wait for all (they run forever until cancelled)
+        // Wait for all (they run forever until cancelled or reach count)
         for handle in handles {
             let _ = handle.await;
         }
