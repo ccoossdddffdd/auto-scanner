@@ -31,7 +31,7 @@ impl OutlookRegisterStrategy {
     async fn random_sleep(&self) {
         let (secs, millis) = {
             let mut rng = rand::rng();
-            (rng.random_range(3..=5), rng.random_range(0..1000))
+            (rng.random_range(1..=3), rng.random_range(0..1000))
         };
         info!("Sleeping for {}.{} seconds...", secs, millis);
         tokio::time::sleep(Duration::from_secs(secs) + Duration::from_millis(millis)).await;
@@ -88,7 +88,7 @@ impl BaseStrategy for OutlookRegisterStrategy {
 
         // Use is_visible to avoid waiting 30s timeout if the button doesn't exist.
         // We check for both Chinese and potentially other common texts if needed, but primarily Chinese for now.
-        let agree_button_selector = "text=同意并继续";
+        let agree_button_selector = "button:has-text('同意并继续'), button:has-text('Agree and continue'), input[value='同意并继续']";
 
         if let Ok(true) = adapter.is_visible(agree_button_selector).await {
             info!(
@@ -105,19 +105,28 @@ impl BaseStrategy for OutlookRegisterStrategy {
             info!("Data permission modal not found (or not visible), skipping...");
         }
 
+        // Define generic selectors
+        let next_button_selector = "#iSignupAction:visible, input[type='submit']:visible, button[type='submit']:visible, button:has-text('Next'):visible, button:has-text('下一步'):visible";
+
         // 2. Fill Email
         // Note: Selectors are based on typical Microsoft flows but might need adjustment if DOM changes
         // Common selectors: input[type="email"], #MemberName
         info!("Filling email...");
+        let email_selector = "input[name=\"MemberName\"], input[type=\"email\"], input[name=\"email\"], input[name=\"loginfmt\"]";
         adapter
-            .wait_for_element("input[name=\"MemberName\"]")
+            .wait_for_element(email_selector)
             .await
             .context("Waiting for email input")?;
-        self.type_with_delay(adapter, "input[name=\"MemberName\"]", &full_email)
+        self.type_with_delay(adapter, email_selector, &full_email)
             .await?;
 
+        info!("Clicking Next button...");
         adapter
-            .click("#iSignupAction")
+            .wait_for_element(next_button_selector)
+            .await
+            .context("Waiting for Next button")?;
+        adapter
+            .click(next_button_selector)
             .await
             .context("Clicking Next after email")?;
         self.random_sleep().await;
@@ -125,19 +134,17 @@ impl BaseStrategy for OutlookRegisterStrategy {
         // 3. Fill Password
         // Common selectors: input[type="password"], #PasswordInput
         info!("Filling password...");
+        let password_selector =
+            "input[name=\"PasswordInput\"], input[type=\"password\"], input[name=\"passwd\"]";
         adapter
-            .wait_for_element("input[name=\"PasswordInput\"]")
+            .wait_for_element(password_selector)
             .await
             .context("Waiting for password input")?;
-        self.type_with_delay(
-            adapter,
-            "input[name=\"PasswordInput\"]",
-            &user_info.password,
-        )
-        .await?;
+        self.type_with_delay(adapter, password_selector, &user_info.password)
+            .await?;
 
         adapter
-            .click("#iSignupAction")
+            .click(next_button_selector)
             .await
             .context("Clicking Next after password")?;
         self.random_sleep().await;
@@ -145,21 +152,14 @@ impl BaseStrategy for OutlookRegisterStrategy {
         // 4. Fill Country and Birth Date
         info!("Filling country and birth date...");
 
-        // Wait for country selector to ensure page loaded
-        adapter
-            .wait_for_element("select[name=\"Country\"]")
-            .await
-            .context("Waiting for country select")?;
-
         // Fill Birth Year
         info!("Filling Birth Year: {}", user_info.birth_year);
         // Sometimes it's an input, sometimes a select. Based on codegen, it's input[name="BirthYear"]
         // Try filling it first
+        let birth_year_selector =
+            "input[name=\"BirthYear\"], input[id=\"BirthYear\"], [aria-label=\"Birth year\"]";
         match adapter
-            .type_text(
-                "input[name=\"BirthYear\"]",
-                &user_info.birth_year.to_string(),
-            )
+            .type_text(birth_year_selector, &user_info.birth_year.to_string())
             .await
         {
             Ok(_) => {}
@@ -177,7 +177,6 @@ impl BaseStrategy for OutlookRegisterStrategy {
                     .ok();
             }
         }
-        self.random_sleep().await;
 
         // Fill Birth Month
         info!("Filling Birth Month: {}", user_info.birth_month);
@@ -190,7 +189,9 @@ impl BaseStrategy for OutlookRegisterStrategy {
         let month_val = user_info.birth_month.to_string();
 
         // 1. Click the dropdown button to open the list
-        if let Err(e) = adapter.click("#BirthMonthDropdown").await {
+        let birth_month_dropdown_selector =
+            "#BirthMonthDropdown, [id=\"BirthMonthDropdown\"], [aria-label=\"Birth month\"]";
+        if let Err(e) = adapter.click(birth_month_dropdown_selector).await {
             warn!("Failed to click BirthMonthDropdown: {}", e);
             // Fallback to old methods just in case
             if let Err(e2) = adapter
@@ -249,14 +250,14 @@ impl BaseStrategy for OutlookRegisterStrategy {
             }
         }
 
-        self.random_sleep().await;
-
         // Fill Birth Day
         info!("Filling Birth Day: {}", user_info.birth_day);
         let day_val = user_info.birth_day.to_string();
 
         // 1. Click the dropdown button
-        if let Err(e) = adapter.click("#BirthDayDropdown").await {
+        let birth_day_dropdown_selector =
+            "#BirthDayDropdown, [id=\"BirthDayDropdown\"], [aria-label=\"Birth day\"]";
+        if let Err(e) = adapter.click(birth_day_dropdown_selector).await {
             warn!("Failed to click BirthDayDropdown: {}", e);
             if let Err(e2) = adapter
                 .select_option("select[name=\"BirthDay\"]", &day_val)
@@ -291,20 +292,12 @@ impl BaseStrategy for OutlookRegisterStrategy {
             }
         }
 
-        self.random_sleep().await;
-
         // Click Next
         // Sometimes the "Next" button ID changes or we need to click text="Next" / "下一步"
         // Also, sometimes there is a delay before the button becomes clickable.
-        if let Err(e) = adapter.click("#iSignupAction").await {
-            warn!("Click #iSignupAction failed: {}, trying text match", e);
-            if let Err(e2) = adapter.click("text=下一步").await {
-                warn!("Click '下一步' failed: {}, trying 'Next'", e2);
-                adapter
-                    .click("text=Next")
-                    .await
-                    .context("Clicking Next after birth date")?;
-            }
+        if let Err(e) = adapter.click(next_button_selector).await {
+            warn!("Click next button failed: {}", e);
+            // Fallback just in case generic selector missed something specific
         }
         self.random_sleep().await;
 
@@ -312,22 +305,26 @@ impl BaseStrategy for OutlookRegisterStrategy {
         // First Name: input[name="FirstName"]
         // Last Name: input[name="LastName"]
         info!("Filling name...");
+        let first_name_selector =
+            "input[name=\"FirstName\"], input[id=\"FirstName\"], input[id=\"firstNameInput\"], [aria-label=\"First name\"]";
         adapter
-            .wait_for_element("input[name=\"FirstName\"]")
+            .wait_for_element(first_name_selector)
             .await
             .context("Waiting for first name input")?;
-        self.type_with_delay(adapter, "input[name=\"FirstName\"]", &user_info.first_name)
+        self.type_with_delay(adapter, first_name_selector, &user_info.first_name)
             .await?;
 
+        let last_name_selector =
+            "input[name=\"LastName\"], input[id=\"LastName\"], input[id=\"lastNameInput\"], [aria-label=\"Last name\"]";
         adapter
-            .wait_for_element("input[name=\"LastName\"]")
+            .wait_for_element(last_name_selector)
             .await
             .context("Waiting for last name input")?;
-        self.type_with_delay(adapter, "input[name=\"LastName\"]", &user_info.last_name)
+        self.type_with_delay(adapter, last_name_selector, &user_info.last_name)
             .await?;
 
         adapter
-            .click("#iSignupAction")
+            .click(next_button_selector)
             .await
             .context("Clicking Next after name")?;
         self.random_sleep().await;
