@@ -177,31 +177,7 @@ impl BaseStrategy for OutlookRegisterStrategy {
             .context("Clicking Next after password")?;
         self.random_sleep().await;
 
-        // 4. Fill Name
-        // First Name: input[name="FirstName"]
-        // Last Name: input[name="LastName"]
-        info!("Filling name...");
-        adapter
-            .wait_for_element("input[name=\"FirstName\"]")
-            .await
-            .context("Waiting for first name input")?;
-        self.type_with_delay(adapter, "input[name=\"FirstName\"]", &user_info.first_name)
-            .await?;
-
-        adapter
-            .wait_for_element("input[name=\"LastName\"]")
-            .await
-            .context("Waiting for last name input")?;
-        self.type_with_delay(adapter, "input[name=\"LastName\"]", &user_info.last_name)
-            .await?;
-
-        adapter
-            .click("#iSignupAction")
-            .await
-            .context("Clicking Next after name")?;
-        self.random_sleep().await;
-
-        // 5. Fill Country and Birth Date
+        // 4. Fill Country and Birth Date
         info!("Filling country and birth date...");
 
         // Wait for country selector to ensure page loaded
@@ -365,6 +341,30 @@ impl BaseStrategy for OutlookRegisterStrategy {
                     .context("Clicking Next after birth date")?;
             }
         }
+        self.random_sleep().await;
+
+        // 5. Fill Name
+        // First Name: input[name="FirstName"]
+        // Last Name: input[name="LastName"]
+        info!("Filling name...");
+        adapter
+            .wait_for_element("input[name=\"FirstName\"]")
+            .await
+            .context("Waiting for first name input")?;
+        self.type_with_delay(adapter, "input[name=\"FirstName\"]", &user_info.first_name)
+            .await?;
+
+        adapter
+            .wait_for_element("input[name=\"LastName\"]")
+            .await
+            .context("Waiting for last name input")?;
+        self.type_with_delay(adapter, "input[name=\"LastName\"]", &user_info.last_name)
+            .await?;
+
+        adapter
+            .click("#iSignupAction")
+            .await
+            .context("Clicking Next after name")?;
         self.random_sleep().await;
 
         // Construct result
