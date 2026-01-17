@@ -90,39 +90,37 @@ impl PidManager {
     #[cfg(windows)]
     fn check_process_running(&self, pid: u32) -> bool {
         use std::process::Command;
-        
+
         // 使用 tasklist 检查进程是否存在
         Command::new("tasklist")
             .args(&["/FI", &format!("PID eq {}", pid)])
             .output()
-            .map(|output| {
-                String::from_utf8_lossy(&output.stdout)
-                    .contains(&pid.to_string())
-            })
+            .map(|output| String::from_utf8_lossy(&output.stdout).contains(&pid.to_string()))
             .unwrap_or(false)
     }
 
     #[cfg(unix)]
     fn kill_process(&self, pid: u32) -> Result<()> {
-        signal::kill(Pid::from_raw(pid as i32), Signal::SIGTERM)
-            .context("Failed to send SIGTERM")
+        signal::kill(Pid::from_raw(pid as i32), Signal::SIGTERM).context("Failed to send SIGTERM")
     }
 
     #[cfg(windows)]
     fn kill_process(&self, pid: u32) -> Result<()> {
         use std::process::Command;
-        
+
         // 使用 taskkill 终止进程
         let output = Command::new("taskkill")
             .args(&["/PID", &pid.to_string(), "/F"])
             .output()
             .context("Failed to execute taskkill")?;
-        
+
         if output.status.success() {
             Ok(())
         } else {
-            anyhow::bail!("Failed to kill process: {}", 
-                String::from_utf8_lossy(&output.stderr))
+            anyhow::bail!(
+                "Failed to kill process: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )
         }
     }
 }

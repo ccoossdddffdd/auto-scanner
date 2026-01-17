@@ -214,7 +214,7 @@ impl OutlookRegisterStrategy {
                     ];
 
                     for sel in selectors {
-                        if let Ok(_) = adapter.click(&sel).await {
+                        if adapter.click(&sel).await.is_ok() {
                             info!("Clicked month option with selector: {}", sel);
                             month_clicked = true;
                             break;
@@ -249,12 +249,12 @@ impl OutlookRegisterStrategy {
             }
         } else {
             tokio::time::sleep(Duration::from_millis(500)).await;
-            
+
             // 生成多种日期文本格式
             let day_texts = vec![
-                day_val.clone(),                    // "1"
-                format!("{}日", day_val),            // "1日"
-                format!("{:02}", day_val.parse::<u32>().unwrap_or(1)), // "01"
+                day_val.clone(),                                         // "1"
+                format!("{}日", day_val),                                // "1日"
+                format!("{:02}", day_val.parse::<u32>().unwrap_or(1)),   // "01"
                 format!("{:02}日", day_val.parse::<u32>().unwrap_or(1)), // "01日"
             ];
 
@@ -270,13 +270,13 @@ impl OutlookRegisterStrategy {
                 ];
 
                 for sel in selectors {
-                    if let Ok(_) = adapter.click(&sel).await {
+                    if adapter.click(&sel).await.is_ok() {
                         info!("Clicked day option with selector: {}", sel);
                         day_clicked = true;
                         break;
                     }
                 }
-                
+
                 if day_clicked {
                     break;
                 }
@@ -286,8 +286,9 @@ impl OutlookRegisterStrategy {
                 warn!("Failed to click any day option for value: {}", day_val);
                 // 最后尝试：直接输入
                 info!("Attempting to type day value directly...");
-                let input_selector = "input[name=\"BirthDay\"], [aria-label=\"Day\"], [aria-label=\"日\"]";
-                if let Ok(_) = adapter.type_text(input_selector, &day_val).await {
+                let input_selector =
+                    "input[name=\"BirthDay\"], [aria-label=\"Day\"], [aria-label=\"日\"]";
+                if adapter.type_text(input_selector, &day_val).await.is_ok() {
                     info!("Successfully typed day value");
                 }
             }
@@ -334,12 +335,12 @@ impl OutlookRegisterStrategy {
     async fn check_verification_and_errors(&self, adapter: &dyn BrowserAdapter) -> Result<()> {
         let has_error = if let Ok(true) = adapter.is_visible(".alert-error").await {
             true
-        } else if let Ok(true) = adapter.is_visible(".error").await {
-            true
-        } else if let Ok(true) = adapter.is_visible("div[aria-live='assertive']").await {
-            true
         } else {
-            false
+            matches!(adapter.is_visible(".error").await, Ok(true))
+                || matches!(
+                    adapter.is_visible("div[aria-live='assertive']").await,
+                    Ok(true)
+                )
         };
 
         if has_error {

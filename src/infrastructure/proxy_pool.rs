@@ -67,15 +67,13 @@ impl ProxyPoolManager {
             )));
         }
 
-        let mut reader = csv::Reader::from_path(path).map_err(|e| {
-            AppError::Parse(format!("无法读取代理池 CSV 文件: {}", e))
-        })?;
+        let mut reader = csv::Reader::from_path(path)
+            .map_err(|e| AppError::Parse(format!("无法读取代理池 CSV 文件: {}", e)))?;
 
         let mut proxies = Vec::new();
         for result in reader.deserialize() {
-            let proxy: ProxyConfig = result.map_err(|e| {
-                AppError::Parse(format!("解析代理配置失败: {}", e))
-            })?;
+            let proxy: ProxyConfig =
+                result.map_err(|e| AppError::Parse(format!("解析代理配置失败: {}", e)))?;
             proxies.push(proxy);
         }
 
@@ -151,7 +149,7 @@ impl ProxyPoolManager {
     /// 随机策略
     async fn get_random(&self, blacklist: &HashSet<String>) -> Option<UserProxyConfig> {
         use rand::prelude::IndexedRandom;
-        
+
         let available_proxies: Vec<_> = self
             .proxies
             .iter()
@@ -173,7 +171,7 @@ impl ProxyPoolManager {
     pub async fn mark_failed(&self, host: &str, port: &str) {
         let identifier = format!("{}:{}", host, port);
         let mut blacklist = self.blacklist.write().await;
-        
+
         if blacklist.insert(identifier.clone()) {
             warn!("代理 {} 已标记为失效并加入黑名单", identifier);
         }
@@ -208,10 +206,7 @@ impl ProxyPoolManager {
         let mut failed_proxies = Vec::new();
 
         for proxy in &self.proxies {
-            let proxy_url = format!(
-                "{}://{}:{}",
-                proxy.proxy_type, proxy.host, proxy.port
-            );
+            let proxy_url = format!("{}://{}:{}", proxy.proxy_type, proxy.host, proxy.port);
 
             let mut proxy_builder = reqwest::Proxy::all(&proxy_url)
                 .map_err(|e| AppError::Network(format!("构建代理失败: {}", e)))?;

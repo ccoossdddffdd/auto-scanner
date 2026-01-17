@@ -218,12 +218,8 @@ impl ShutdownSignal {
     #[cfg(unix)]
     fn new() -> Result<Self> {
         Ok(Self {
-            sigterm: tokio::signal::unix::signal(
-                tokio::signal::unix::SignalKind::terminate()
-            )?,
-            sigint: tokio::signal::unix::signal(
-                tokio::signal::unix::SignalKind::interrupt()
-            )?,
+            sigterm: tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?,
+            sigint: tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?,
         })
     }
 

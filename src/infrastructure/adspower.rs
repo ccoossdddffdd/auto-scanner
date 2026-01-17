@@ -358,22 +358,22 @@ impl AdsPowerClient {
                 Some(proxy_config) => {
                     info!(
                         "从代理池分配代理: {}:{}",
-                        proxy_config.proxy_host.as_ref().unwrap_or(&"unknown".to_string()),
-                        proxy_config.proxy_port.as_ref().unwrap_or(&"unknown".to_string())
+                        proxy_config
+                            .proxy_host
+                            .as_ref()
+                            .unwrap_or(&"unknown".to_string()),
+                        proxy_config
+                            .proxy_port
+                            .as_ref()
+                            .unwrap_or(&"unknown".to_string())
                     );
                     (proxy_config, None)
                 }
                 None => {
                     warn!("代理池无可用代理，回退到环境变量 ADSPOWER_PROXYID");
-                    let proxyid = self
-                        .config
-                        .proxy_id
-                        .clone()
-                        .ok_or_else(|| {
-                            AppError::Config(
-                                "代理池为空且缺少 ADSPOWER_PROXYID 配置".to_string(),
-                            )
-                        })?;
+                    let proxyid = self.config.proxy_id.clone().ok_or_else(|| {
+                        AppError::Config("代理池为空且缺少 ADSPOWER_PROXYID 配置".to_string())
+                    })?;
                     (UserProxyConfig::with_proxyid(), Some(proxyid))
                 }
             }
@@ -432,22 +432,22 @@ impl AdsPowerClient {
                     info!(
                         "为 Worker {} 分配固定代理: {}:{}",
                         worker_index,
-                        proxy_config.proxy_host.as_ref().unwrap_or(&"unknown".to_string()),
-                        proxy_config.proxy_port.as_ref().unwrap_or(&"unknown".to_string())
+                        proxy_config
+                            .proxy_host
+                            .as_ref()
+                            .unwrap_or(&"unknown".to_string()),
+                        proxy_config
+                            .proxy_port
+                            .as_ref()
+                            .unwrap_or(&"unknown".to_string())
                     );
                     (proxy_config, None)
                 }
                 None => {
                     warn!("代理池无可用代理，回退到环境变量 ADSPOWER_PROXYID");
-                    let proxyid = self
-                        .config
-                        .proxy_id
-                        .clone()
-                        .ok_or_else(|| {
-                            AppError::Config(
-                                "代理池为空且缺少 ADSPOWER_PROXYID 配置".to_string(),
-                            )
-                        })?;
+                    let proxyid = self.config.proxy_id.clone().ok_or_else(|| {
+                        AppError::Config("代理池为空且缺少 ADSPOWER_PROXYID 配置".to_string())
+                    })?;
                     (UserProxyConfig::with_proxyid(), Some(proxyid))
                 }
             }

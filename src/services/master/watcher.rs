@@ -23,7 +23,7 @@ impl InputWatcher {
                                         continue;
                                     }
                                 }
-                                
+
                                 if FilePolicyService::is_supported_file(&path) {
                                     // Use blocking_send because this is a sync callback
                                     if let Err(e) = tx.blocking_send(path.clone()) {

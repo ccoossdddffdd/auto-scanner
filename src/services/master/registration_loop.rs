@@ -33,7 +33,7 @@ impl RegistrationLoopHandler {
     // Alternative: Just spawn `thread_count` long-running loops.
     pub async fn run_continuously(&self) {
         let register_count = self.config.register_count;
-        
+
         // 判断运行模式
         if register_count == 0 {
             info!("无限循环模式：将持续注册账号");
@@ -50,10 +50,10 @@ impl RegistrationLoopHandler {
 
             let handle = tokio::spawn(async move {
                 let mut registered = 0;
-                
+
                 // 初始延迟，避免 AdsPower API 速率限制
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                
+
                 loop {
                     let dummy_account =
                         Account::new("new_user".to_string(), "password".to_string());
@@ -65,11 +65,17 @@ impl RegistrationLoopHandler {
                         // The strategy returns "处理中" for now as success placeholder
                         if res.status == "成功" || res.status == "处理中" {
                             registered += 1;
-                            info!("注册流程完成 ({}/{}): {:?}", 
-                                  registered, 
-                                  if count == 0 { "∞".to_string() } else { count.to_string() },
-                                  res);
-                            
+                            info!(
+                                "注册流程完成 ({}/{}): {:?}",
+                                registered,
+                                if count == 0 {
+                                    "∞".to_string()
+                                } else {
+                                    count.to_string()
+                                },
+                                res
+                            );
+
                             let date_str = Local::now().format("%Y%m%d").to_string();
                             let filename = format!("outlook_register_{}.csv", date_str);
                             let file_path = context.state.doned_dir.join(filename);
@@ -77,7 +83,7 @@ impl RegistrationLoopHandler {
                             if let Err(e) = Self::save_result(&file_path, res).await {
                                 error!("保存结果失败: {}", e);
                             }
-                            
+
                             // 检查是否达到目标数量
                             if count > 0 && registered >= count {
                                 info!("已完成 {} 个账号注册，程序将退出", registered);
@@ -93,7 +99,7 @@ impl RegistrationLoopHandler {
                         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                         continue;
                     }
-                    
+
                     // 限定数量模式，每次循环都延迟
                     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 }
