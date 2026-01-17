@@ -240,41 +240,65 @@ impl BaseStrategy for OutlookRegisterStrategy {
 
         // Fill Birth Month
         info!("Filling Birth Month: {}", user_info.birth_month);
-        // Month is usually a select. Codegen failed to find `select[name="BirthMonth"]`.
-        // It might be `select[id="BirthMonth"]` or similar.
-        // Let's try multiple selectors or use the new `select_option` method.
-        // Common MS selector: `select[aria-label="Birth month"]` or similar.
-        // Let's try generic approach: `select` inside birth date container?
-        // Let's try `#BirthMonth` again with `select_option`.
 
         let month_val = user_info.birth_month.to_string();
-        // Note: value might need to be "1" or "01" or "January".
-        // Usually numeric value "1" works for MS.
 
-        if let Err(e) = adapter.select_option("#BirthMonth", &month_val).await {
-            warn!("Failed to select month with #BirthMonth: {}", e);
-            // Try name
-            if let Err(e2) = adapter
-                .select_option("select[name=\"BirthMonth\"]", &month_val)
-                .await
-            {
-                warn!("Failed to select month with name: {}", e2);
+        // Try multiple selectors for Birth Month
+        // 1. ID: BirthMonthDropdown
+        // 2. Name: BirthMonth
+        // 3. Aria-label: "Birth month" or "出生月份"
+
+        let month_selectors = vec![
+            "#BirthMonthDropdown",
+            "select[name=\"BirthMonth\"]",
+            "select[aria-label=\"Birth month\"]",
+            "select[aria-label=\"出生月份\"]",
+        ];
+
+        let mut month_selected = false;
+        for selector in &month_selectors {
+            if let Ok(_) = adapter.select_option(selector, &month_val).await {
+                info!("Successfully selected month with selector: {}", selector);
+                month_selected = true;
+                break;
             }
         }
+
+        if !month_selected {
+            warn!("Failed to select month with all attempted selectors");
+        }
+
         self.random_sleep().await;
 
         // Fill Birth Day
         info!("Filling Birth Day: {}", user_info.birth_day);
         let day_val = user_info.birth_day.to_string();
-        if let Err(e) = adapter.select_option("#BirthDay", &day_val).await {
-            warn!("Failed to select day with #BirthDay: {}", e);
-            if let Err(e2) = adapter
-                .select_option("select[name=\"BirthDay\"]", &day_val)
-                .await
-            {
-                warn!("Failed to select day with name: {}", e2);
+
+        // Try multiple selectors for Birth Day
+        // 1. ID: BirthDayDropdown
+        // 2. Name: BirthDay
+        // 3. Aria-label: "Birth day" or "出生日期"
+
+        let day_selectors = vec![
+            "#BirthDayDropdown",
+            "select[name=\"BirthDay\"]",
+            "select[aria-label=\"Birth day\"]",
+            "select[aria-label=\"出生日期\"]",
+        ];
+
+        let mut day_selected = false;
+        for selector in &day_selectors {
+            if let Ok(_) = adapter.select_option(selector, &day_val).await {
+                info!("Successfully selected day with selector: {}", selector);
+                day_selected = true;
+                break;
             }
         }
+
+        if !day_selected {
+            warn!("Failed to select day with all attempted selectors");
+        }
+
         self.random_sleep().await;
 
         // Click Next
