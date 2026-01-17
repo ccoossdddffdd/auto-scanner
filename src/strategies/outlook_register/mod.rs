@@ -353,10 +353,18 @@ impl BaseStrategy for OutlookRegisterStrategy {
         self.random_sleep().await;
 
         // Click Next
-        adapter
-            .click("#iSignupAction")
-            .await
-            .context("Clicking Next after birth date")?;
+        // Sometimes the "Next" button ID changes or we need to click text="Next" / "下一步"
+        // Also, sometimes there is a delay before the button becomes clickable.
+        if let Err(e) = adapter.click("#iSignupAction").await {
+            warn!("Click #iSignupAction failed: {}, trying text match", e);
+            if let Err(e2) = adapter.click("text=下一步").await {
+                warn!("Click '下一步' failed: {}, trying 'Next'", e2);
+                adapter
+                    .click("text=Next")
+                    .await
+                    .context("Clicking Next after birth date")?;
+            }
+        }
         self.random_sleep().await;
 
         // Construct result
