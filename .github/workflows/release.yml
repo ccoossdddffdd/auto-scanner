@@ -9,6 +9,10 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+# 设置 GITHUB_TOKEN 权限
+permissions:
+  contents: write  # 允许创建 Release 和上传资产
+
 jobs:
   create-release:
     name: Create Release
