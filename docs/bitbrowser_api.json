@@ -1,0 +1,1117 @@
+{
+	"info": {
+		"_postman_id": "7ac7a906-a5a7-4320-87ba-de0eeb3ad511",
+		"name": "Bitnet Export",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "4444109"
+	},
+	"item": [
+		{
+			"name": "创建、更新修改窗口",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"success?\", function () {",
+							"    var jsonData = pm.response.json();",
+							"    pm.expect(jsonData.success).to.eql(true);",
+							"});",
+							"",
+							"// pm.test('ua and version', () => {",
+							"//     const jsonData = pm.response.json()",
+							"//     pm.expect(jsonData.data.browserFingerPrint.version).",
+							"// })"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"auth": {
+					"type": "bearer",
+					"bearer": [
+						{
+							"key": "token",
+							"value": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJzdWIiOiIyYzljMjlhMjdlMjMwZDE0MDE3ZTIzYzE1MWNlMDAzNiIsImlhdCI6MTY1NTM2NzY5OX0.kNS57QX-PVNseQG9ZTr1UpwwVMdrS_eEQYYfA1P40MWnj7km18mJV9YhBfJE3-MSOhdigYWeo3asyFlGFweOZg",
+							"type": "string"
+						}
+					]
+				},
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"id\": null,\n    \"proxyMethod\": 2,\n    \"proxyType\": \"noproxy\",\n    \"host\": \"\",\n    \"port\": \"\",\n    \"proxyUserName\": \"\",\n    \"proxyPassword\": \"\",\n    \"browserFingerPrint\": {\n        \"coreVersion\": \"104\"\n    }\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://127.0.0.1:54345/browser/update",
+					"protocol": "http",
+					"host": [
+						"127",
+						"0",
+						"0",
+						"1"
+					],
+					"port": "54345",
+					"path": [
+						"browser",
+						"update"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "更新浏览器窗口部分属性",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"success?\", function () {",
+							"    var jsonData = pm.response.json();",
+							"    pm.expect(jsonData.success).to.eql(true);",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"auth": {
+					"type": "bearer",
+					"bearer": [
+						{
+							"key": "token",
+							"value": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJzdWIiOiIyYzljMjlhMjdlMjMwZDE0MDE3ZTIzYzE1MWNlMDAzNiIsImlhdCI6MTY1NTM2NzY5OX0.kNS57QX-PVNseQG9ZTr1UpwwVMdrS_eEQYYfA1P40MWnj7km18mJV9YhBfJE3-MSOhdigYWeo3asyFlGFweOZg",
+							"type": "string"
+						}
+					]
+				},
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"ids\": [\n        \"dc42dcc36838453b8d0111180af8359d\"\n    ],\n    \"name\":\"我修改了...\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://127.0.0.1:54345/browser/update/partial",
+					"protocol": "http",
+					"host": [
+						"127",
+						"0",
+						"0",
+						"1"
+					],
+					"port": "54345",
+					"path": [
+						"browser",
+						"update",
+						"partial"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "浏览器列表",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"page\":0,\n    \"pageSize\": 10,\n    \"groupId\": \"2c996b378032c2f601803a6f42d41246\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://127.0.0.1:54346/browser/list",
+					"protocol": "http",
+					"host": [
+						"127",
+						"0",
+						"0",
+						"1"
+					],
+					"port": "54346",
+					"path": [
+						"browser",
+						"list"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "浏览器简略信息列表",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"page\":0,\n    \"pageSize\": 100,\n    \"sortDirection\": \"desc\",\n    \"sortProperties\":\"seq\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://127.0.0.1:55055/browser/list/concise",
+					"protocol": "http",
+					"host": [
+						"127",
+						"0",
+						"0",
+						"1"
+					],
+					"port": "55055",
+					"path": [
+						"browser",
+						"list",
+						"concise"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "获取给定浏览器的pids",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"ids\": [\"9bc8a0c63844455195b1552b149fd22d\",\"485e5450abdd4ae3a3f12534cc249860\",\"8675fe850e354d0db04a31a9673f5fcc\"]\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://127.0.0.1:55055/browser/pids",
+					"protocol": "http",
+					"host": [
+						"127",
+						"0",
+						"0",
+						"1"
+					],
+					"port": "55055",
+					"path": [
+						"browser",
+						"pids"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "获取给定浏览器的pids，检测是否还alive",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"ids\": [\"2c996b378169cbb4018169d7818a04b8\",\"e516fd562c99446c97b4c54933e914d7\",\"566491e2dd9a4723a07a01d4beeb730f\"]\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://127.0.0.1:55055/browser/pids/alive",
+					"protocol": "http",
+					"host": [
+						"127",
+						"0",
+						"0",
+						"1"
+					],
+					"port": "55055",
+					"path": [
+						"browser",
+						"pids",
+						"alive"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "获取所有或者的浏览器的pids",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://127.0.0.1:54345/browser/pids/all",
+					"protocol": "http",
+					"host": [
+						"127",
+						"0",
+						"0",
+						"1"
+					],
+					"port": "54345",
+					"path": [
+						"browser",
+						"pids",
+						"all"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "创建分组",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"groupName\":\"1212dsds3223dssd\",\n    \"sortNum\": 1\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://127.0.0.1:55055/group/add",
+					"protocol": "http",
+					"host": [
+						"127",
+						"0",
+						"0",
+						"1"
+					],
+					"port": "55055",
+					"path": [
+						"group",
+						"add"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "修改分组",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"groupName\":\"share group 333\",\n    \"sortNum\": 0,\n    \"id\":\"2c9cce4485a93d8f0185aa557d39005e\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://127.0.0.1:55055/group/edit",
+					"protocol": "http",
+					"host": [
+						"127",
+						"0",
+						"0",
+						"1"
+					],
+					"port": "55055",
+					"path": [
+						"group",
+						"edit"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "删除分组",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"id\":\"2c9cce4485a93d8f0185aa557d39005e\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://127.0.0.1:55055/group/delete",
+					"protocol": "http",
+					"host": [
+						"127",
+						"0",
+						"0",
+						"1"
+					],
+					"port": "55055",
+					"path": [
+						"group",
+						"delete"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "获取分组详情",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"id\":\"sdf\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://127.0.0.1:55055/group/detail",
+					"protocol": "http",
+					"host": [
+						"127",
+						"0",
+						"0",
+						"1"
+					],
+					"port": "55055",
+					"path": [
+						"group",
+						"detail"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "获取分组list",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"page\": 0,\n    \"pageSize\": 10,\n    \"all\": true,\n    \"sortDirection\": \"asc\",\n    \"sortProperties\": \"sortNum\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://127.0.0.1:54345/group/list",
+					"protocol": "http",
+					"host": [
+						"127",
+						"0",
+						"0",
+						"1"
+					],
+					"port": "54345",
+					"path": [
+						"group",
+						"list"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "自定义排列窗口",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n      \"type\": \"box\",\n      \"startX\": 0,\n      \"startY\": 0,\n      \"width\": 800,\n      \"height\": 500,\n      \"col\": 4,\n      \"spaceX\": 0,\n      \"spaceY\": 0,\n      \"offsetX\": 50,\n      \"offsetY\": 50,\n      \"seqlist\": [4270,4271]\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://127.0.0.1:54345/windowbounds",
+					"protocol": "http",
+					"host": [
+						"127",
+						"0",
+						"0",
+						"1"
+					],
+					"port": "54345",
+					"path": [
+						"windowbounds"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "自定义排列窗口，自适应",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"seqlist\": []\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://127.0.0.1:54345/windowbounds/flexable",
+					"protocol": "http",
+					"host": [
+						"127",
+						"0",
+						"0",
+						"1"
+					],
+					"port": "54345",
+					"path": [
+						"windowbounds",
+						"flexable"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "打开窗口",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"id\":\"2c9cce44888b6fc001888ba66dfd0272\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://127.0.0.1:60535/browser/open",
+					"protocol": "http",
+					"host": [
+						"127",
+						"0",
+						"0",
+						"1"
+					],
+					"port": "60535",
+					"path": [
+						"browser",
+						"open"
+					]
+				}
+			},
+			"response": [
+				{
+					"name": "打开浏览器",
+					"originalRequest": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"id\":\"1877393ee30b495ab03f81eecf6d0f68\",\n    \"args\": []\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://127.0.0.1:54345/browser/open",
+							"protocol": "http",
+							"host": [
+								"127",
+								"0",
+								"0",
+								"1"
+							],
+							"port": "54345",
+							"path": [
+								"browser",
+								"open"
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "application/json; charset=utf-8"
+						},
+						{
+							"key": "Content-Length",
+							"value": "340"
+						},
+						{
+							"key": "Date",
+							"value": "Wed, 12 Jul 2023 03:18:35 GMT"
+						},
+						{
+							"key": "Connection",
+							"value": "keep-alive"
+						},
+						{
+							"key": "Keep-Alive",
+							"value": "timeout=5"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"success\": true,\n    \"data\": {\n        \"ws\": \"ws://127.0.0.1:53325/devtools/browser/857b2d0d-aae6-4852-ab3c-0784f0b2c1fb\",\n        \"http\": \"127.0.0.1:53325\",\n        \"coreVersion\": \"112\",\n        \"driver\": \"/Users/ningxiaobing/Library/Application Support/Electron/chromedriver/112/chromedriver\",\n        \"seq\": 3474,\n        \"name\": \"\",\n        \"remark\": \"\",\n        \"groupId\": \"2c9c29a28161edd0018161f3790d0002\",\n        \"pid\": 31295\n    }\n}"
+				}
+			]
+		},
+		{
+			"name": "批量修改分组",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"groupId\":\"2c9c29a27e230d14017e23c151ce0036\",\n    \"browserIds\": [\"dc42dcc36838453b8d0111180af8359d\"]\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://127.0.0.1:54345/browser/group/update",
+					"protocol": "http",
+					"host": [
+						"127",
+						"0",
+						"0",
+						"1"
+					],
+					"port": "54345",
+					"path": [
+						"browser",
+						"group",
+						"update"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "批量修改备注",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"remark\":\"sdfsdfsdfsdfsd d233\",\n    \"browserIds\": [\"dc42dcc36838453b8d0111180af8359d\"]\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://127.0.0.1:54345/browser/remark/update",
+					"protocol": "http",
+					"host": [
+						"127",
+						"0",
+						"0",
+						"1"
+					],
+					"port": "54345",
+					"path": [
+						"browser",
+						"remark",
+						"update"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "批量修改代理",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"ids\": [\n        \"e70e6338f7764b78bb5a6a8ddf9125b6\"\n    ],\n    \"ipCheckService\": \"ip-api\",\n    \"proxyMethod\": 2,\n    \"proxyType\": \"noproxy\",\n    \"host\": \"\",\n    \"port\": \"\",\n    \"proxyUserName\": \"\",\n    \"proxyPassword\": \"\",\n    \"ip\": \"\",\n    \"city\": \"\",\n    \"province\": \"\",\n    \"country\": \"\",\n    \"isIpNoChange\": false,\n    \"dynamicIpUrl\": \"\",\n    \"dynamicIpChannel\": \"rola\",\n    \"isDynamicIpChangeIp\": true,\n    \"isGlobalProxyInfo\": false,\n    \"isIpv6\": false\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://127.0.0.1:55055/browser/proxy/update",
+					"protocol": "http",
+					"host": [
+						"127",
+						"0",
+						"0",
+						"1"
+					],
+					"port": "55055",
+					"path": [
+						"browser",
+						"proxy",
+						"update"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "关闭浏览器窗口",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"id\":\"9288ac7ac6e146fbbe5bfbe72a56b29e\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://127.0.0.1:54345/browser/close",
+					"protocol": "http",
+					"host": [
+						"127",
+						"0",
+						"0",
+						"1"
+					],
+					"port": "54345",
+					"path": [
+						"browser",
+						"close"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "批量关闭浏览器窗口",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"seqs\": [1,3782,3783,9999]\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://127.0.0.1:55055/browser/close/byseqs",
+					"protocol": "http",
+					"host": [
+						"127",
+						"0",
+						"0",
+						"1"
+					],
+					"port": "55055",
+					"path": [
+						"browser",
+						"close",
+						"byseqs"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "获取用户信息",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"url": {
+					"raw": "http://127.0.0.1:54345/userInfo",
+					"protocol": "http",
+					"host": [
+						"127",
+						"0",
+						"0",
+						"1"
+					],
+					"port": "54345",
+					"path": [
+						"userInfo"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "删除浏览器窗口",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"id\":\"dc42dcc36838453b8d0111180af8359d\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://127.0.0.1:54345/browser/delete",
+					"protocol": "http",
+					"host": [
+						"127",
+						"0",
+						"0",
+						"1"
+					],
+					"port": "54345",
+					"path": [
+						"browser",
+						"delete"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "批量删除浏览器窗口",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"ids\": [\n    \"06291e429d6145fb9a74f8dd3f843126\",\n    \"828bcecfe3b648af9c42d1afb1c011ee\",\n    \"c201f2c21d41456d910393363727e12b\",\n    \"a5770979529b4a0eacf3fbdefc07d7c6\",\n    \"3acddddd18b5476f84b8ca8db818a27b\",\n    \"12a1aa1ea2f744858dc37e0c755d2e67\",\n    \"af571b48b43147bf8145fb0f1ee135cc\",\n    \"c5c2845ad4d04e2fa71efa7310743697\",\n    \"76b001b495824eb7b32fae3b8409aa92\",\n    \"5f71e689c0c94b6880a9d1f25c50889e\",\n    \"9f2abca1194c4b06898c3a6be296f49a\",\n    \"40f4824fa3764201aaa00dc323e40740\",\n    \"2d1fda67d75841b88fefb31dd684b6a7\",\n    \"64f4e325c51740dfba9a9fd2804d566b\",\n    \"d61efea6dc154cb4ac4d69251a647a34\",\n    \"ea24a59a556d417c89f184d433aff4f9\",\n    \"df4156cbbb8442f4be9972cfc83b0392\",\n    \"4ce7771fd4d04a88aa8f8b8be5fddc50\",\n    \"a54e2c8ad7cd4b5ca9a4b8abd6bd09b1\",\n    \"c36c1725c56c4d7ead65bcd10c3c798c\",\n    \"56208e285f8a423aa8887be290b43edb\",\n    \"7eddfcc69a194431afe30bbf78e18111\",\n    \"b244426e1230410395deed31c4dd9d40\",\n    \"11ed2677730f4cfeaa892dc6725cee30\",\n    \"8b6e073b60c04f10a471671f08fea8a5\",\n    \"6f016ece5e054a07a1cfaced35981819\",\n    \"717101e76b1347b081c3dd6cdea096ad\",\n    \"05dc33eee35c4c8e96c5c11f002cbd94\",\n    \"6f172dc52fe64618bff4c51a4229c180\",\n    \"2acc4d8972f44f8f98ef8d04499feb3c\",\n    \"1eeb76e190984c4186003abfe9434656\",\n    \"cc531ae4a10942368181b7925d223fbb\",\n    \"b3a8c3f25576488c8ce2a17f7f81075c\",\n    \"3c5749a358464c8e9102a98ad40cac32\",\n    \"a2012f7ecb5b455187c38cc603ca4bf1\",\n    \"ad12682e1907475bb2b59ea652d1d24f\",\n    \"75ae08bd3a574eff9582e2524bda52db\",\n    \"4e931c18ca334a5991d4196c88705bc2\",\n    \"cad20179a9624d4bb2b10d9aa878b140\",\n    \"ff88a90772484b739907651be43fee6e\",\n    \"31ee199765b7476f8121076abf29bb42\",\n    \"968eb834f6444ffc8563a6de4fa7e95b\",\n    \"8a3707c279804e719bca5dd34165ae30\",\n    \"262d401399684377a20cd304319f13b0\",\n    \"83de5d7b8f3d486195e3af0064d0509b\",\n    \"7759e9efd59040df977bb8cf43c4780b\",\n    \"14e22ad206174ebf9f4f3b88e408bd6a\",\n    \"70c11d5625724c33a2211e54a8db8391\",\n    \"5ce4d3d415c64228a2b4a731f959a174\",\n    \"0df2bc2933034633a1c6aad9e4f7d6de\",\n    \"f6c0b87c542b4e81a52e9eb10b2935b9\",\n    \"920f8f0484e64acda862e5fe745df3b1\",\n    \"a627e92dd37746718109a778feb112bd\",\n    \"6d7ecd8e59b045a78d2217f73eb62898\",\n    \"be1d0061414744b0833b3ccf3a4e16d1\",\n    \"d26d9b0ccb7c45da91ee28552a784473\",\n    \"d3882743ad964a16ba3580f1fde1c746\",\n    \"7269c8ddeba34ee89500e35d33e8fa24\",\n    \"84936f2a05c940ca8cfa4dc245b4cb76\",\n    \"f3ca341adbaa4361861aa08492f71fa7\",\n    \"f0ed7d64ea6948b994054acefe426e00\",\n    \"43742ddbc5b242c0a4dd88dca651f553\",\n    \"5a129afe617d402296a2ed6bbd1b9c03\",\n    \"2d3615e68ab34df3a0e5c1bf65b91abc\",\n    \"6a9ceb157758445e935479d4cb3d0798\",\n    \"a53b72c82a1240af8c1267095164bb63\",\n    \"8625462c187645799026558f894c19ed\",\n    \"b6c8feaaa1604fbd8d44a2ad32b63df6\",\n    \"479c68696e844fb29cd252637b2543ce\",\n    \"cb36cf3a456f42ca892599d2e6e2514f\",\n    \"4fb322536e2046419d56429dc358eb96\",\n    \"93c34477d11b46c792ffefb518283ea3\",\n    \"25a311bfb27944cc84e73f5b25760fb7\",\n    \"44642107270d4c7db6fb72d3190a1707\",\n    \"f69dfed7670742d7a9cb4c91d05a9782\",\n    \"cc753eb55bdb41e08d1c224772c37b22\",\n    \"e5fd9596039246fbb44dd11dcfcfd1fe\",\n    \"b1797e04743e48a689c9d66b5b8103d2\",\n    \"b6ac6ded14b649609d72768fc4eacda4\",\n    \"62d323a880d04f41a0eef1c28c6a7ef5\",\n    \"577e994ba9674df0bfd5a25ce9a2215f\",\n    \"25054496b3474c45bca4be87b9c9a38d\",\n    \"c859db9bcbe94f5196f633a997d2cc94\",\n    \"917c6bb610b34fcf8da519d75d00619d\",\n    \"c818b48e94584627aab5542e18da7e71\",\n    \"9b4d94a61c63450da69f0214b49f34d8\",\n    \"21502c94e8f444f7bf6603faa82f8458\",\n    \"c3a17faa389f479292a13ab484aad583\",\n    \"bfc88c1699314ac0a73799ed217763c4\",\n    \"5462d70a36b344b9b0da68279ab77572\",\n    \"b136822de2d44e6e9f77bf6e0e0841f8\",\n    \"1033db688e9442b79697705031b50f88\",\n    \"7822f13177c44aa081f82496984f1e53\",\n    \"e3256708e3454289af4e6ff67a710686\",\n    \"5b8a4fd18d834eabb7453945dbc52ae7\",\n    \"5f29c849a4114945a39b3d4807dea4d3\",\n    \"41614660b51a43468d7494f3398e0628\",\n    \"063ebea053cc4210bf78cc8fa89780ff\",\n    \"dd3873a6428b45f9ad78b2630d56d60f\",\n    \"ca68a470ff744fa4907fc04d8b24e86c\"\n]\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://127.0.0.1:55055/browser/delete/ids",
+					"protocol": "http",
+					"host": [
+						"127",
+						"0",
+						"0",
+						"1"
+					],
+					"port": "55055",
+					"path": [
+						"browser",
+						"delete",
+						"ids"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "获取浏览器窗口详情",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"id\":\"dc42dcc36838453b8d0111180af8359d\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://127.0.0.1:54345/browser/detail",
+					"protocol": "http",
+					"host": [
+						"127",
+						"0",
+						"0",
+						"1"
+					],
+					"port": "54345",
+					"path": [
+						"browser",
+						"detail"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "接口健康检测",
+			"protocolProfileBehavior": {
+				"followRedirects": false,
+				"strictSSL": true
+			},
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://127.0.0.1:55055/health",
+					"protocol": "http",
+					"host": [
+						"127",
+						"0",
+						"0",
+						"1"
+					],
+					"port": "55055",
+					"path": [
+						"health"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "重启窗口",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"all\": false,\n    \"ids\": [\"d51698e179b346c7baa7bea80ad0af11\", \"4a6fdd2b52ba4b46b61580bb23d989de\"]\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://127.0.0.1:54345/browser/reopenAtPos",
+					"protocol": "http",
+					"host": [
+						"127",
+						"0",
+						"0",
+						"1"
+					],
+					"port": "54345",
+					"path": [
+						"browser",
+						"reopenAtPos"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "所有已打开窗口的端口",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"url": {
+					"raw": "http://127.0.0.1:54346/browser/ports",
+					"protocol": "http",
+					"host": [
+						"127",
+						"0",
+						"0",
+						"1"
+					],
+					"port": "54346",
+					"path": [
+						"browser",
+						"ports"
+					]
+				}
+			},
+			"response": [
+				{
+					"name": "所有已打开窗口的端口",
+					"originalRequest": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "http://127.0.0.1:54345/browser/ports",
+							"protocol": "http",
+							"host": [
+								"127",
+								"0",
+								"0",
+								"1"
+							],
+							"port": "54345",
+							"path": [
+								"browser",
+								"ports"
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "application/json; charset=utf-8"
+						},
+						{
+							"key": "Content-Length",
+							"value": "111"
+						},
+						{
+							"key": "Date",
+							"value": "Thu, 20 Jul 2023 05:51:17 GMT"
+						},
+						{
+							"key": "Connection",
+							"value": "keep-alive"
+						},
+						{
+							"key": "Keep-Alive",
+							"value": "timeout=5"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"success\": true,\n    \"data\": {\n        \"8caf925feebb4d2fb0bfd79ed9591e11\": \"64170\",\n        \"c6925679d4e848a59e7ec49e44184013\": \"64217\"\n    }\n}"
+				}
+			]
+		},
+		{
+			"name": "代理检测",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"host\":\"gb.smartproxy.com\",\n    \"port\":30001,\n    \"proxyType\":\"http\",\n    \"proxyUserName\":\"user-sp48760349-sessionduration-30\",\n    \"proxyPassword\":\"FFiil6j5u80xeWNqav\",\n    \"id\":\"xxx\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://127.0.0.1:54345/checkagent",
+					"protocol": "http",
+					"host": [
+						"127",
+						"0",
+						"0",
+						"1"
+					],
+					"port": "54345",
+					"path": [
+						"checkagent"
+					]
+				}
+			},
+			"response": [
+				{
+					"name": "New Request",
+					"originalRequest": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"host\":\"127.0.0.1\",\n    \"port\":1080,\n    \"proxyType\":\"socks5\",\n    \"proxyUserName\":\"\",\n    \"proxyPassword\":\"\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://127.0.0.1:54345/checkagent",
+							"protocol": "http",
+							"host": [
+								"127",
+								"0",
+								"0",
+								"1"
+							],
+							"port": "54345",
+							"path": [
+								"checkagent"
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "application/json; charset=utf-8"
+						},
+						{
+							"key": "Content-Length",
+							"value": "330"
+						},
+						{
+							"key": "Date",
+							"value": "Mon, 07 Aug 2023 04:04:55 GMT"
+						},
+						{
+							"key": "Connection",
+							"value": "keep-alive"
+						},
+						{
+							"key": "Keep-Alive",
+							"value": "timeout=5"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"success\": true,\n    \"data\": {\n        \"success\": true,\n        \"data\": {\n            \"ip\": \"94.154.157.98\",\n            \"countryName\": \"英国(GB)\",\n            \"stateProv\": \"England(ENG)\",\n            \"countryCode\": \"GB\",\n            \"region\": \"ENG\",\n            \"city\": \"London\",\n            \"languages\": \"en-GB\",\n            \"timeZone\": \"Europe/London\",\n            \"offset\": \"1\",\n            \"longitude\": \"-0.0991\",\n            \"latitude\": \"51.5269\",\n            \"zip\": \"EC1V\",\n            \"status\": 1,\n            \"used\": false,\n            \"usedTime\": null\n        }\n    }\n}"
+				}
+			]
+		}
+	]
+}

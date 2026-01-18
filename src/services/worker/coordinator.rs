@@ -184,10 +184,9 @@ impl WorkerCoordinator {
                 error!("停止浏览器失败: {}", e);
             }
 
-            // 根据新需求，不再删除配置文件，而是保留给下次使用（指纹会在启动时更新）
-            // if let Err(e) = client.delete_profile(&sess.profile_id).await {
-            //     error!("删除浏览器配置文件 {} 失败: {}", sess.profile_id, e);
-            // }
+            if let Err(e) = client.delete_profile(&sess.profile_id).await {
+                error!("删除浏览器配置文件 {} 失败: {}", sess.profile_id, e);
+            }
         }
 
         let _ = self.permit_tx.send(thread_index).await;
