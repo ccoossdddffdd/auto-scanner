@@ -110,17 +110,13 @@ impl BrowserAdapter for AgentBrowserAdapter {
     }
 
     async fn is_visible(&self, selector: &str) -> Result<bool, BrowserError> {
-        let output = self.exec(&["is", "visible", selector]).await?;
-        let result: Value = serde_json::from_str(&output)
-            .map_err(|e| BrowserError::Other(format!("解析 JSON 失败: {}", e)))?;
+        let result = self.exec_json(&["is", "visible", selector]).await?;
         
         Ok(result.get("visible").and_then(|v| v.as_bool()).unwrap_or(false))
     }
 
     async fn get_cookies(&self) -> Result<Vec<BrowserCookie>, BrowserError> {
-        let output = self.exec(&["cookies"]).await?;
-        let cookies: Value = serde_json::from_str(&output)
-            .map_err(|e| BrowserError::Other(format!("解析 cookies 失败: {}", e)))?;
+        let cookies = self.exec_json(&["cookies"]).await?;
 
         let mut result = Vec::new();
         if let Some(arr) = cookies.as_array() {
@@ -157,9 +153,7 @@ impl BrowserAdapter for AgentBrowserAdapter {
     }
 
     async fn get_current_url(&self) -> Result<String, BrowserError> {
-        let output = self.exec(&["get", "url"]).await?;
-        let result: Value = serde_json::from_str(&output)
-            .map_err(|e| BrowserError::Other(format!("解析 URL 失败: {}", e)))?;
+        let result = self.exec_json(&["get", "url"]).await?;
         
         result.get("url")
             .and_then(|v| v.as_str())
@@ -168,9 +162,7 @@ impl BrowserAdapter for AgentBrowserAdapter {
     }
 
     async fn get_text(&self, selector: &str) -> Result<String, BrowserError> {
-        let output = self.exec(&["get", "text", selector]).await?;
-        let result: Value = serde_json::from_str(&output)
-            .map_err(|e| BrowserError::Other(format!("解析文本失败: {}", e)))?;
+        let result = self.exec_json(&["get", "text", selector]).await?;
         
         result.get("text")
             .and_then(|v| v.as_str())
@@ -181,9 +173,7 @@ impl BrowserAdapter for AgentBrowserAdapter {
     async fn get_all_text(&self, selector: &str) -> Result<Vec<String>, BrowserError> {
         // agent-browser 不直接支持获取所有匹配元素的文本
         // 这里先获取数量，然后逐个获取
-        let count_output = self.exec(&["get", "count", selector]).await?;
-        let count_result: Value = serde_json::from_str(&count_output)
-            .map_err(|e| BrowserError::Other(format!("解析数量失败: {}", e)))?;
+        let count_result = self.exec_json(&["get", "count", selector]).await?;
         
         let count = count_result.get("count")
             .and_then(|v| v.as_u64())
@@ -207,9 +197,7 @@ impl BrowserAdapter for AgentBrowserAdapter {
     }
 
     async fn get_content(&self) -> Result<String, BrowserError> {
-        let output = self.exec(&["get", "html", "body"]).await?;
-        let result: Value = serde_json::from_str(&output)
-            .map_err(|e| BrowserError::Other(format!("解析 HTML 失败: {}", e)))?;
+        let result = self.exec_json(&["get", "html", "body"]).await?;
         
         result.get("html")
             .and_then(|v| v.as_str())

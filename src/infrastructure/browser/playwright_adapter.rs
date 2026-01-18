@@ -28,13 +28,18 @@ impl PlaywrightAdapterBuilder {
         let playwright = self.init_playwright().await?;
         let chromium = playwright.chromium();
 
-        info!(
-            "正在连接到浏览器 {} ({:?} 超时)...",
-            self.remote_url, self.connect_timeout
-        );
+        let browser = if self.remote_url.is_empty() || self.remote_url == "launch" {
+            info!("启动本地浏览器 (headless)...");
+            self.launch_browser(&chromium).await?
+        } else {
+            info!(
+                "正在连接到浏览器 {} ({:?} 超时)...",
+                self.remote_url, self.connect_timeout
+            );
+            self.connect_cdp(&chromium).await?
+        };
 
-        let browser = self.connect_cdp(&chromium).await?;
-        info!("成功连接到浏览器。");
+        info!("成功连接/启动浏览器。");
 
         let context = Self::get_or_create_context(&browser).await?;
         let page = Self::get_or_create_page(&context).await?;
@@ -51,6 +56,37 @@ impl PlaywrightAdapterBuilder {
         Playwright::initialize()
             .await
             .map_err(|e| BrowserError::ConnectionFailed(format!("初始化 Playwright 失败: {}", e)))
+    }
+
+    async fn launch_browser(&self, chromium: &BrowserType) -> Result<Browser, BrowserError> {
+        let args = vec![
+            "--disable-gpu".to_string(),
+            "--no-sandbox".to_string(),
+            "--disable-dev-shm-usage".to_string(),
+        ];
+
+        let path_opt = if let Ok(home) = std::env::var("HOME") {
+            let p = std::path::PathBuf::from(home).join("Library/Caches/ms-playwright/chromium-1200/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing");
+            if p.exists() {
+                Some(p)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let launcher = chromium.launcher();
+        let launcher = launcher.headless(true).args(&args);
+
+        let result = if let Some(path) = &path_opt {
+            info!("使用浏览器可执行文件: {:?}", path);
+            launcher.executable(path).launch().await
+        } else {
+            launcher.launch().await
+        };
+
+        result.map_err(|e| BrowserError::ConnectionFailed(format!("启动浏览器失败: {}", e)))
     }
 
     async fn connect_cdp(&self, chromium: &BrowserType) -> Result<Browser, BrowserError> {
@@ -147,6 +183,7 @@ impl BrowserAdapter for PlaywrightAdapter {
     async fn navigate(&self, url: &str) -> Result<(), BrowserError> {
         self.page
             .goto_builder(url)
+            .timeout(60000.0) // 60s timeout
             .goto()
             .await
             .map_err(|e| BrowserError::NavigationFailed(e.to_string()))?;

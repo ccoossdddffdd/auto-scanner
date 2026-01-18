@@ -21,6 +21,7 @@ pub struct MasterConfig {
     pub email_poll_interval: u64,
     pub exe_path: Option<PathBuf>,
     pub register_count: usize,
+    pub input_file: Option<PathBuf>,
 }
 
 pub async fn run(config: AppConfig) -> Result<()> {

@@ -148,11 +148,16 @@ impl MasterContext {
 struct FileProcessingHandler {
     config: MasterConfig,
     context: Arc<MasterContext>,
+    skip_move: bool,
 }
 
 impl FileProcessingHandler {
-    fn new(config: MasterConfig, context: Arc<MasterContext>) -> Self {
-        Self { config, context }
+    fn new(config: MasterConfig, context: Arc<MasterContext>, skip_move: bool) -> Self {
+        Self {
+            config,
+            context,
+            skip_move,
+        }
     }
 
     async fn handle_incoming_file(&self, csv_path: PathBuf) {
@@ -200,7 +205,11 @@ impl FileProcessingHandler {
         };
 
         let file_config = FileConfig {
-            doned_dir: self.context.state.doned_dir.clone(),
+            doned_dir: if self.skip_move {
+                None
+            } else {
+                Some(self.context.state.doned_dir.clone())
+            },
         };
 
         ProcessConfig::new(batch_name, browser_config, worker_config, file_config)
@@ -318,14 +327,45 @@ impl MasterServer {
                 }
             }
             WorkerStrategy::FacebookLogin => {
-                info!("检测到 Facebook 登录策略，启动文件监控模式...");
-                self.run_file_watcher_mode(context).await?;
+                if let Some(input_file) = &self.config.master.input_file {
+                    info!(
+                        "检测到 Facebook 登录策略 (单文件模式)，处理文件: {:?}",
+                        input_file
+                    );
+                    self.run_single_file_mode(input_file.clone(), context)
+                        .await?;
+                } else {
+                    info!("检测到 Facebook 登录策略，启动文件监控模式...");
+                    self.run_file_watcher_mode(context).await?;
+                }
             }
         }
 
         pid_manager.remove_pid_file();
         info!("Master 关闭完成");
 
+        Ok(())
+    }
+
+    async fn run_single_file_mode(
+        &self,
+        input_file: PathBuf,
+        context: Arc<MasterContext>,
+    ) -> Result<()> {
+        let handler = FileProcessingHandler::new(self.config.master.clone(), context.clone(), true);
+
+        if !input_file.exists() {
+            anyhow::bail!("输入文件不存在: {:?}", input_file);
+        }
+
+        if !FilePolicyService::is_supported_file(&input_file) {
+            anyhow::bail!("不支持的文件类型: {:?}", input_file);
+        }
+
+        // 直接处理文件
+        handler.handle_incoming_file(input_file).await;
+
+        info!("单文件处理完成");
         Ok(())
     }
 
@@ -343,7 +383,8 @@ impl MasterServer {
         }
 
         let _watcher = InputWatcher::new(context.state.input_path.clone(), tx.clone())?;
-        let handler = FileProcessingHandler::new(self.config.master.clone(), context.clone());
+        let handler =
+            FileProcessingHandler::new(self.config.master.clone(), context.clone(), false);
 
         info!("等待新文件...");
 
@@ -398,11 +439,14 @@ impl MasterServer {
                 info!("BitBrowser API 可达");
             }
             _ => {
-                let url_str = if self.config.master.remote_url.is_empty() {
-                    "http://127.0.0.1:9222"
-                } else {
-                    &self.config.master.remote_url
-                };
+                if self.config.master.remote_url.is_empty()
+                    || self.config.master.remote_url == "launch"
+                {
+                    info!("检测到本地启动模式，跳过浏览器连接检查");
+                    return Ok(());
+                }
+
+                let url_str = &self.config.master.remote_url;
 
                 let url =
                     Url::parse(url_str).context(format!("解析 remote_url 失败: {}", url_str))?;

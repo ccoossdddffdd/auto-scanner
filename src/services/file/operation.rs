@@ -63,7 +63,7 @@ pub async fn write_results_and_rename(
     results: Vec<(usize, Option<WorkerResult>)>,
     records: Vec<Vec<String>>,
     headers: Vec<String>,
-    doned_dir: &Path,
+    doned_dir: Option<&Path>,
 ) -> Result<PathBuf> {
     let source = get_account_source(path);
 
@@ -132,8 +132,14 @@ pub async fn write_results_and_rename(
         let new_xlsx_path = path.with_extension("xlsx");
         fs::rename(path, &new_xlsx_path).context("重命名 .xls 到 .xlsx 失败")?;
         info!("已将处理后的 .xls 重命名为 .xlsx: {:?}", new_xlsx_path);
-        rename_processed_file(&new_xlsx_path, doned_dir)
+        if let Some(dir) = doned_dir {
+            rename_processed_file(&new_xlsx_path, dir)
+        } else {
+            Ok(new_xlsx_path)
+        }
+    } else if let Some(dir) = doned_dir {
+        rename_processed_file(path, dir)
     } else {
-        rename_processed_file(path, doned_dir)
+        Ok(path.to_path_buf())
     }
 }

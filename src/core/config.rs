@@ -37,7 +37,15 @@ impl AppConfig {
         dotenv::dotenv().ok();
 
         // Check essential env vars
-        let input_dir = env::var("INPUT_DIR").context("必须设置 INPUT_DIR 环境变量")?;
+        let input_dir = if let Some(ref file) = master.input_file {
+            // 如果指定了单文件模式，INPUT_DIR 是可选的
+            // 我们将其设置为文件所在的目录，或者默认为当前目录
+            file.parent()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| ".".to_string())
+        } else {
+            env::var("INPUT_DIR").context("必须设置 INPUT_DIR 环境变量")?
+        };
 
         let adspower = if master.backend == "adspower" {
             Some(AdsPowerConfig::from_env()?)

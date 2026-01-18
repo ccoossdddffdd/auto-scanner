@@ -51,6 +51,10 @@ pub enum Commands {
         /// Outlook 注册策略的总注册数量（0 表示无限循环）
         #[arg(long, default_value = "0")]
         register_count: usize,
+
+        /// 手动指定输入文件进行处理（单文件模式）
+        #[arg(long)]
+        input_file: Option<String>,
     },
     /// 以 Worker 模式运行，执行单个任务（通常由 Master 调用）
     Worker {

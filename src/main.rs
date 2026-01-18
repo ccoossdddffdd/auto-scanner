@@ -23,6 +23,7 @@ fn main() -> Result<()> {
             enable_email_monitor,
             email_poll_interval,
             register_count,
+            input_file,
         } => {
             if daemon && !stop && !status {
                 start_daemon(PID_FILE, "logs/auto-scanner.out", "logs/auto-scanner.err")?;
@@ -41,6 +42,7 @@ fn main() -> Result<()> {
                 email_poll_interval,
                 exe_path: None,
                 register_count,
+                input_file: input_file.map(std::path::PathBuf::from),
             };
 
             // 初始化日志（需要先于配置加载，以便记录配置加载过程中的警告）
