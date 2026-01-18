@@ -45,7 +45,7 @@ impl AdsPowerConfig {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct ProfileConfig {
     pub group_id: String,
     pub domain_name: String,

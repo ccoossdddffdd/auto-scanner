@@ -76,6 +76,7 @@ async fn test_end_to_end_workflow() {
         config,
         input_dir_str,
         None, // adspower
+        None, // bitbrowser
         None, // email
     );
 

@@ -101,9 +101,9 @@ impl MasterContext {
                 Ok(Some(Arc::new(AdsPowerClient::new(adspower_config))))
             }
             "bitbrowser" => {
-                let bitbrowser_config =
-                    config.bitbrowser.clone().context("BitBrowser 配置缺失")?;
-                Ok(Some(Arc::new(BitBrowserClient::new(bitbrowser_config))))
+                let bitbrowser_config = config.bitbrowser.clone().context("BitBrowser 配置缺失")?;
+                let client = BitBrowserClient::new(bitbrowser_config)?;
+                Ok(Some(Arc::new(client)))
             }
             _ => Ok(None),
         }
@@ -382,16 +382,18 @@ impl MasterServer {
 
         match self.config.master.backend.as_str() {
             "adspower" => {
-                let adspower_config =
-                    self.config.adspower.clone().context("AdsPower 配置缺失")?;
+                let adspower_config = self.config.adspower.clone().context("AdsPower 配置缺失")?;
                 let client = AdsPowerClient::new(adspower_config);
                 client.check_connectivity().await?;
                 info!("AdsPower API 可达");
             }
             "bitbrowser" => {
-                let bitbrowser_config =
-                    self.config.bitbrowser.clone().context("BitBrowser 配置缺失")?;
-                let client = BitBrowserClient::new(bitbrowser_config);
+                let bitbrowser_config = self
+                    .config
+                    .bitbrowser
+                    .clone()
+                    .context("BitBrowser 配置缺失")?;
+                let client = BitBrowserClient::new(bitbrowser_config)?;
                 client.check_connectivity().await?;
                 info!("BitBrowser API 可达");
             }

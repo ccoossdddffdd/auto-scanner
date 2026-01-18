@@ -10,6 +10,7 @@ use crate::infrastructure::bitbrowser::types::{
 use crate::infrastructure::browser_manager::BrowserEnvironmentManager;
 use crate::infrastructure::proxy_pool::ProxyPoolManager;
 use async_trait::async_trait;
+use futures::future::join_all;
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::json;
@@ -65,6 +66,7 @@ struct StartBrowserResponse {
     ws: String,
 }
 
+#[derive(Clone)]
 pub struct BitBrowserClient {
     client: Client,
     config: BitBrowserConfig,
@@ -72,16 +74,16 @@ pub struct BitBrowserClient {
 }
 
 impl BitBrowserClient {
-    pub fn new(config: BitBrowserConfig) -> Self {
-        Self {
+    pub fn new(config: BitBrowserConfig) -> AppResult<Self> {
+        Ok(Self {
             client: Client::builder()
                 .timeout(Duration::from_secs(30))
                 .no_proxy()
                 .build()
-                .expect("创建 reqwest 客户端失败"),
+                .map_err(|e| AppError::Config(format!("创建 reqwest 客户端失败: {}", e)))?,
             config,
             proxy_pool: None,
-        }
+        })
     }
 
     /// 配置代理池管理器
@@ -204,7 +206,7 @@ impl BitBrowserClient {
     pub async fn ensure_profiles_for_workers(
         &self,
         worker_count: usize,
-        _config: Option<&ProfileConfig>,
+        config: Option<&ProfileConfig>,
     ) -> AppResult<()> {
         info!(
             "正在为 {} 个 Worker 检查 BitBrowser 配置文件...",
@@ -222,16 +224,29 @@ impl BitBrowserClient {
         let existing_names: HashSet<String> =
             data.list.into_iter().filter_map(|p| p.name).collect();
 
+        let mut futures = Vec::new();
+
         for i in 0..worker_count {
             let target_name = format!("auto-scanner-worker-{}", i);
             if !existing_names.contains(&target_name) {
-                info!("正在创建缺失的配置文件: {}", target_name);
-                let browser_id = self.create_profile(&target_name, None, i).await?;
-                info!("已创建配置文件 {}，ID: {}", target_name, browser_id);
+                let client = self.clone();
+                let config = config.cloned();
+                futures.push(async move {
+                    info!("正在创建缺失的配置文件: {}", target_name);
+                    match client
+                        .create_profile(&target_name, config.as_ref(), i)
+                        .await
+                    {
+                        Ok(id) => info!("已创建配置文件 {}，ID: {}", target_name, id),
+                        Err(e) => warn!("创建配置文件 {} 失败: {}", target_name, e),
+                    }
+                });
             } else {
                 info!("配置文件已存在: {}", target_name);
             }
         }
+
+        join_all(futures).await;
         Ok(())
     }
 
@@ -279,7 +294,7 @@ impl BitBrowserClient {
     async fn create_profile(
         &self,
         username: &str,
-        _profile_config: Option<&ProfileConfig>,
+        profile_config: Option<&ProfileConfig>,
         worker_index: usize,
     ) -> AppResult<String> {
         let chrome_version = FingerprintGenerator::generate_random_chrome_version();
@@ -288,6 +303,9 @@ impl BitBrowserClient {
             "正在创建配置文件 {}，Chrome 版本: {}",
             username, chrome_version
         );
+
+        let default_config = ProfileConfig::default();
+        let config = profile_config.unwrap_or(&default_config);
 
         // 检查是否配置了动态 IP URL
         let dynamic_ip_url = std::env::var("DYNAMIC_IP_URL").ok();
@@ -334,8 +352,8 @@ impl BitBrowserClient {
             id: None,
             name: Some(username.to_string()),
             group_id: None, // 不指定分组，使用默认分组
-            domain_name: Some("facebook.com".to_string()),
-            open_urls: Some(vec!["https://www.facebook.com".to_string()]),
+            domain_name: Some(config.domain_name.clone()),
+            open_urls: Some(config.open_urls.clone()),
             browser_finger_print: BrowserFingerPrint {
                 core_version: chrome_version,
                 ostype: Some("PC".to_string()),
