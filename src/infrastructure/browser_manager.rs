@@ -18,4 +18,5 @@ pub trait BrowserEnvironmentManager: Send + Sync {
     async fn start_browser(&self, user_id: &str) -> AppResult<String>;
     async fn stop_browser(&self, user_id: &str) -> AppResult<()>;
     async fn delete_profile(&self, user_id: &str) -> AppResult<()>;
+    async fn update_profile_fingerprint(&self, user_id: &str) -> AppResult<()>;
 }

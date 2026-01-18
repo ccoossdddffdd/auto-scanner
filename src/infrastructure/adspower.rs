@@ -4,7 +4,7 @@ pub mod types;
 use crate::core::error::{AppError, AppResult};
 use crate::infrastructure::adspower::fingerprint::FingerprintGenerator;
 use crate::infrastructure::adspower::types::{
-    CreateProfileRequest, FingerprintConfig, RandomUaConfig, UserProxyConfig,
+    CreateProfileRequest, FingerprintConfig, RandomUaConfig, UpdateProfileRequest, UserProxyConfig,
 };
 use crate::infrastructure::browser_manager::BrowserEnvironmentManager;
 use crate::infrastructure::proxy_pool::ProxyPoolManager;
@@ -536,6 +536,33 @@ impl AdsPowerClient {
         info!("已删除 AdsPower 配置文件: {}", user_id);
         Ok(())
     }
+
+    pub async fn update_profile_fingerprint(&self, user_id: &str) -> AppResult<()> {
+        let ua_system_version = FingerprintGenerator::generate_random_system();
+
+        info!(
+            "正在更新配置文件 {} 指纹，新 UA 系统: {}",
+            user_id, ua_system_version
+        );
+
+        let request = UpdateProfileRequest {
+            user_id: user_id.to_string(),
+            fingerprint_config: Some(FingerprintConfig {
+                random_ua: RandomUaConfig {
+                    ua_browser: vec!["chrome".to_string()],
+                    ua_system_version: vec![ua_system_version.to_string()],
+                },
+            }),
+            user_proxy_config: None,
+            proxyid: None,
+        };
+
+        let _: serde_json::Value = self
+            .call_api("POST", "/api/v1/user/update", Some(request))
+            .await?;
+
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -570,5 +597,9 @@ impl BrowserEnvironmentManager for AdsPowerClient {
 
     async fn delete_profile(&self, user_id: &str) -> AppResult<()> {
         self.delete_profile(user_id).await
+    }
+
+    async fn update_profile_fingerprint(&self, user_id: &str) -> AppResult<()> {
+        self.update_profile_fingerprint(user_id).await
     }
 }

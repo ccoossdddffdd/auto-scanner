@@ -1,3 +1,4 @@
+use crate::core::models::WorkerResult;
 use crate::infrastructure::browser_manager::BrowserEnvironmentManager;
 use crate::services::email::monitor::EmailMonitor;
 use crate::services::file::get_account_source;
@@ -7,6 +8,7 @@ use crate::services::worker::orchestrator::WorkerOrchestrator;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
 /// 浏览器配置
@@ -27,7 +29,7 @@ pub struct WorkerConfig {
 /// 文件配置
 #[derive(Clone)]
 pub struct FileConfig {
-    pub doned_dir: PathBuf,
+    pub doned_dir: Option<PathBuf>,
 }
 
 /// 处理配置
@@ -167,15 +169,72 @@ async fn process_accounts(
         config.worker.strategy.clone(),
     );
 
-    let results = coordinator.spawn_batch(&accounts).await;
+    let (tx, mut rx) = mpsc::channel(100);
+    let coordinator_clone = coordinator.clone();
+    let accounts_clone = accounts.clone();
 
-    write_results_and_rename(
-        path,
-        &extension,
-        results,
-        records,
-        headers,
-        &config.file.doned_dir,
-    )
-    .await
+    tokio::spawn(async move {
+        coordinator_clone
+            .spawn_batch_stream(&accounts_clone, tx)
+            .await;
+    });
+
+    // 初始化结果列表，默认状态为"待处理"
+    let mut current_results: Vec<Option<WorkerResult>> = (0..accounts.len())
+        .map(|_| {
+            Some(WorkerResult {
+                status: "待处理".to_string(),
+                message: "等待执行...".to_string(),
+                data: None,
+            })
+        })
+        .collect();
+
+    let total_count = accounts.len();
+    let mut completed_count = 0;
+    let mut final_path = path.to_path_buf();
+
+    // 实时接收结果并更新文件
+    while let Some((idx, res_opt)) = rx.recv().await {
+        completed_count += 1;
+        current_results[idx] = res_opt;
+
+        let results_for_write: Vec<(usize, Option<WorkerResult>)> = current_results
+            .iter()
+            .enumerate()
+            .map(|(i, r)| (i, r.clone()))
+            .collect();
+
+        let is_last = completed_count == total_count;
+        let target_doned_dir = if is_last {
+            config.file.doned_dir.as_deref()
+        } else {
+            None
+        };
+
+        match write_results_and_rename(
+            path,
+            &extension,
+            results_for_write,
+            records.clone(),
+            headers.clone(),
+            target_doned_dir,
+        )
+        .await
+        {
+            Ok(p) => {
+                final_path = p;
+                if is_last {
+                    info!("所有任务完成，最终文件保存为: {:?}", final_path);
+                } else {
+                    info!("进度更新: {}/{} - 结果已保存", completed_count, total_count);
+                }
+            }
+            Err(e) => {
+                error!("写入结果文件失败: {}", e);
+            }
+        }
+    }
+
+    Ok(final_path)
 }

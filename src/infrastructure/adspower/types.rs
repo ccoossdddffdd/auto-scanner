@@ -12,6 +12,17 @@ pub struct CreateProfileRequest {
 }
 
 #[derive(Debug, Serialize)]
+pub struct UpdateProfileRequest {
+    pub user_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fingerprint_config: Option<FingerprintConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_proxy_config: Option<UserProxyConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proxyid: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct FingerprintConfig {
     pub random_ua: RandomUaConfig,
 }

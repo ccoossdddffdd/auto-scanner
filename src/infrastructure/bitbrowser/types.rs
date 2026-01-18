@@ -36,6 +36,13 @@ pub struct CreateProfileRequest {
     pub is_dynamic_ip_change_ip: Option<bool>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct UpdateFingerprintRequest {
+    pub id: String,
+    #[serde(rename = "browserFingerPrint")]
+    pub browser_finger_print: BrowserFingerPrint,
+}
+
 fn is_empty_string(s: &str) -> bool {
     s.is_empty()
 }

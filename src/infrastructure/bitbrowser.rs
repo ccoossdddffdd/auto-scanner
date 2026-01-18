@@ -5,7 +5,7 @@ use crate::core::error::{AppError, AppResult};
 use crate::infrastructure::adspower::ProfileConfig;
 use crate::infrastructure::bitbrowser::fingerprint::FingerprintGenerator;
 use crate::infrastructure::bitbrowser::types::{
-    BrowserFingerPrint, CreateProfileRequest, ProxyConfig,
+    BrowserFingerPrint, CreateProfileRequest, ProxyConfig, UpdateFingerprintRequest,
 };
 use crate::infrastructure::browser_manager::BrowserEnvironmentManager;
 use crate::infrastructure::proxy_pool::ProxyPoolManager;
@@ -424,6 +424,29 @@ impl BitBrowserClient {
         info!("已删除 BitBrowser 配置文件: {}", browser_id);
         Ok(())
     }
+
+    pub async fn update_profile_fingerprint(&self, browser_id: &str) -> AppResult<()> {
+        let chrome_version = FingerprintGenerator::generate_random_chrome_version();
+
+        info!(
+            "正在更新 BitBrowser 配置文件 {} 指纹，新 Chrome 版本: {}",
+            browser_id, chrome_version
+        );
+
+        let request = UpdateFingerprintRequest {
+            id: browser_id.to_string(),
+            browser_finger_print: BrowserFingerPrint {
+                core_version: chrome_version,
+                ostype: Some("PC".to_string()),
+            },
+        };
+
+        let _: serde_json::Value = self
+            .call_api("POST", "/browser/update", Some(request))
+            .await?;
+
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -458,5 +481,9 @@ impl BrowserEnvironmentManager for BitBrowserClient {
 
     async fn delete_profile(&self, user_id: &str) -> AppResult<()> {
         self.delete_profile(user_id).await
+    }
+
+    async fn update_profile_fingerprint(&self, user_id: &str) -> AppResult<()> {
+        self.update_profile_fingerprint(user_id).await
     }
 }

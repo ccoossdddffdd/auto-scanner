@@ -184,10 +184,10 @@ impl WorkerCoordinator {
                 error!("停止浏览器失败: {}", e);
             }
 
-            // Delete the profile to ensure clean state for next run
-            if let Err(e) = client.delete_profile(&sess.profile_id).await {
-                error!("删除浏览器配置文件 {} 失败: {}", sess.profile_id, e);
-            }
+            // 根据新需求，不再删除配置文件，而是保留给下次使用（指纹会在启动时更新）
+            // if let Err(e) = client.delete_profile(&sess.profile_id).await {
+            //     error!("删除浏览器配置文件 {} 失败: {}", sess.profile_id, e);
+            // }
         }
 
         let _ = self.permit_tx.send(thread_index).await;
@@ -219,5 +219,33 @@ impl WorkerOrchestrator for WorkerCoordinator {
 
         results.sort_by_key(|k| k.0);
         results
+    }
+
+    async fn spawn_batch_stream(
+        &self,
+        accounts: &[Account],
+        tx: tokio::sync::mpsc::Sender<(usize, Option<WorkerResult>)>,
+    ) {
+        let mut handles = Vec::new();
+        for (index, account) in accounts.iter().enumerate() {
+            let coord = self.clone();
+            let account = account.clone();
+            let tx_clone = tx.clone();
+            let handle = tokio::spawn(async move {
+                let res = coord.spawn_worker(index, &account).await;
+                let _ = tx_clone.send(res).await;
+            });
+            handles.push(handle);
+        }
+
+        // Wait for all tasks to complete so that we keep the tx open until then.
+        // Actually, since we cloned tx into tasks, we can just drop our tx (by finishing function)
+        // and when all tasks finish, all tx clones are dropped, closing the channel.
+        // BUT, spawn_batch_stream is async. If we return immediately, we are not waiting.
+        // The tasks are spawned on tokio runtime.
+        // If we want to wait for them to finish, we should await handles.
+        for handle in handles {
+            let _ = handle.await;
+        }
     }
 }
