@@ -8,6 +8,7 @@ pub enum LoginStatus {
     Captcha,
     TwoFactor,
     WrongPassword,
+    UserNotFound,
     AccountLocked,
     Failed,
 }
@@ -30,10 +31,11 @@ impl<'a> LoginStatusDetector<'a> {
         }
 
         // Parallel checks for failure conditions
-        let (has_captcha, has_2fa, wrong_password, account_locked) = tokio::join!(
+        let (has_captcha, has_2fa, wrong_password, user_not_found, account_locked) = tokio::join!(
             self.check_captcha(adapter, &current_url),
             self.check_2fa(adapter, &current_url),
             self.check_wrong_password(adapter, &current_url),
+            self.check_user_not_found(adapter, &current_url),
             self.check_account_locked(adapter, &current_url),
         );
 
@@ -43,6 +45,8 @@ impl<'a> LoginStatusDetector<'a> {
             LoginStatus::TwoFactor
         } else if wrong_password {
             LoginStatus::WrongPassword
+        } else if user_not_found {
+            LoginStatus::UserNotFound
         } else if account_locked {
             LoginStatus::AccountLocked
         } else {
@@ -125,8 +129,52 @@ impl<'a> LoginStatusDetector<'a> {
         // Note: URL check alone might be weak for wrong password, usually there is text.
         // But we keep existing logic + text check.
 
-        self.check_keywords_in_containers(adapter, &self.config.keywords.wrong_password)
+        if self
+            .check_keywords_in_containers(adapter, &self.config.keywords.wrong_password)
             .await
+        {
+            return true;
+        }
+
+        // Fallback: Check body text for wrong password keywords
+        if let Ok(body_text) = adapter.get_text("body").await {
+            let text_lower = body_text.to_lowercase();
+            for keyword in &self.config.keywords.wrong_password {
+                if text_lower.contains(&keyword.to_lowercase()) {
+                    info!("Matched wrong_password keyword '{}' in body text", keyword);
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    async fn check_user_not_found(&self, adapter: &dyn BrowserAdapter, _url: &str) -> bool {
+        if self
+            .check_keywords_in_containers(adapter, &self.config.keywords.user_not_found)
+            .await
+        {
+            return true;
+        }
+
+        // Fallback: Check body text for specific long error messages
+        // This is safe because the keywords are very specific
+        if let Ok(body_text) = adapter.get_text("body").await {
+            info!(
+                "Body text (first 200 chars): {}",
+                body_text.chars().take(200).collect::<String>()
+            );
+            let text_lower = body_text.to_lowercase();
+            for keyword in &self.config.keywords.user_not_found {
+                if text_lower.contains(&keyword.to_lowercase()) {
+                    info!("Matched user_not_found keyword '{}' in body text", keyword);
+                    return true;
+                }
+            }
+        }
+
+        false
     }
 
     async fn check_account_locked(&self, adapter: &dyn BrowserAdapter, url: &str) -> bool {
@@ -171,9 +219,11 @@ impl<'a> LoginStatusDetector<'a> {
             if let Ok(visible) = adapter.is_visible(selector).await {
                 if visible {
                     if let Ok(text) = adapter.get_text(selector).await {
+                        info!("Found text in error container '{}': {}", selector, text);
                         let text_lower = text.to_lowercase();
                         for keyword in keywords {
                             if text_lower.contains(&keyword.to_lowercase()) {
+                                info!("Matched keyword '{}'", keyword);
                                 return true;
                             }
                         }

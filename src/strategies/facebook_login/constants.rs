@@ -119,6 +119,7 @@ pub struct Keywords {
     pub captcha: Vec<String>,
     pub wrong_password: Vec<String>,
     pub account_locked: Vec<String>,
+    pub user_not_found: Vec<String>,
 }
 
 impl Default for Keywords {
@@ -183,6 +184,9 @@ impl Default for Keywords {
                 "kata sandi salah".to_string(),
                 "รหัสผ่านไม่ถูกต้อง".to_string(),
                 "كلمة السر غير صحيحة".to_string(),
+                "パスワードが正しくありません".to_string(),
+                "入力されたパスワードが間違っています".to_string(),
+                "パスワードが間違っています".to_string(),
             ],
             account_locked: vec![
                 "account locked".to_string(),
@@ -212,6 +216,25 @@ impl Default for Keywords {
                 "akun terkunci".to_string(),
                 "บัญชีถูกล็อค".to_string(),
                 "حساب مقفل".to_string(),
+            ],
+            user_not_found: vec![
+                "email address you entered isn't connected to an account".to_string(),
+                "isn't connected to an account".to_string(),
+                "no account found".to_string(),
+                "入力されたメールアドレスはアカウントにリンクされていません".to_string(),
+                "アカウントにリンクされていません".to_string(),
+                "没有找到账号".to_string(),
+                "该邮箱未注册".to_string(),
+                "el correo electrónico que ingresaste no está conectado a una cuenta".to_string(),
+                "no está conectado a una cuenta".to_string(),
+                "l'adresse e-mail que vous avez saisie n'est pas associée à un compte".to_string(),
+                "n'est pas associée à un compte".to_string(),
+                "e-mailadresse ist mit keinem konto verknüpft".to_string(),
+                "mit keinem konto verknüpft".to_string(),
+                "l'indirizzo e-mail inserito non è collegato a un account".to_string(),
+                "non è collegato a un account".to_string(),
+                "o email que você inseriu não está conectado a uma conta".to_string(),
+                "não está conectado a uma conta".to_string(),
             ],
         }
     }

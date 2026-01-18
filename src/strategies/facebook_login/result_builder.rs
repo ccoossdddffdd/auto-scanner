@@ -68,6 +68,11 @@ impl FacebookResultBuilder {
                 result.status = "登录失败".to_string();
                 result.message = "密码错误".to_string();
             }
+            LoginStatus::UserNotFound => {
+                info!("User not found detected");
+                result.status = "登录失败".to_string();
+                result.message = "账号不存在".to_string();
+            }
             LoginStatus::Failed => {}
         }
 
