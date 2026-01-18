@@ -11,6 +11,7 @@
 - 🎯 **代理池管理**：支持轮询、随机、粘性分配三种策略
 - 🖥️ **跨平台支持**：完整支持 Windows、Linux、macOS（Intel & Apple Silicon）
 - 🌐 **指纹浏览器集成**：深度集成 AdsPower、BitBrowser 浏览器指纹管理
+- 🤖 **多浏览器后端**：支持 Playwright、Agent Browser、指纹浏览器
 - 📧 **邮件自动化**：支持 IMAP 邮件监控和自动化处理
 - 🔄 **Master-Worker 架构**：灵活的分布式任务处理
 - 📦 **多种输入格式**：支持 CSV、Excel 文件输入
@@ -112,6 +113,9 @@ export ADSPOWER_PROXYID=your_proxy_id
 export BITBROWSER_API_URL=http://127.0.0.1:54345
 export BITBROWSER_API_KEY=your_api_key_here
 
+# Agent Browser 配置（如果使用 Agent Browser）
+export AGENT_BROWSER_PATH=/usr/local/bin/agent-browser  # 可选，默认使用 PATH 中的
+
 # 邮件配置（可选）
 export IMAP_SERVER=imap.gmail.com
 export IMAP_PORT=993
@@ -179,6 +183,7 @@ cargo fmt --check
 - [开发指南](AGENTS.md) - 架构设计和开发规范
 - [代理池管理](docs/PROXY_POOL_GUIDE.md) - 代理池配置和使用
 - [BitBrowser 集成](docs/BITBROWSER_GUIDE.md) - BitBrowser 指纹浏览器集成指南
+- [Agent Browser 集成](docs/AGENT_BROWSER_GUIDE.md) - Agent Browser 轻量级自动化指南
 - [跨平台支持](docs/CROSS_PLATFORM.md) - 平台特定说明
 - [GitHub Actions](docs/GITHUB_ACTIONS.md) - CI/CD 流程
 - [更新日志](CHANGELOG.md) - 版本更新历史

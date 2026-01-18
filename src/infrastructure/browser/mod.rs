@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use thiserror::Error;
 
+pub mod agent_browser_adapter;
 pub mod mock_adapter;
 pub mod playwright_adapter;
 

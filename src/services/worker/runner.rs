@@ -1,6 +1,9 @@
 use crate::core::models::{Account, WorkerResult};
 use crate::infrastructure::browser::{
-    mock_adapter::MockBrowserAdapter, playwright_adapter::PlaywrightAdapter, BrowserAdapter,
+    agent_browser_adapter::AgentBrowserAdapter,
+    mock_adapter::MockBrowserAdapter, 
+    playwright_adapter::PlaywrightAdapter, 
+    BrowserAdapter,
 };
 use crate::services::worker::factory::StrategyFactory;
 use crate::services::worker::strategy::WorkerStrategy;
@@ -24,6 +27,10 @@ pub async fn run(
         "playwright" | "cdp" | "adspower" | "bitbrowser" => match PlaywrightAdapter::new(&remote_url).await {
             Ok(adapter) => Ok(Box::new(adapter)),
             Err(e) => Err(anyhow::anyhow!("初始化 Playwright 适配器失败: {}", e)),
+        },
+        "agent-browser" => match AgentBrowserAdapter::new(Some(username.clone())).await {
+            Ok(adapter) => Ok(Box::new(adapter)),
+            Err(e) => Err(anyhow::anyhow!("初始化 Agent Browser 适配器失败: {}", e)),
         },
         "mock" => Ok(Box::new(MockBrowserAdapter::new())),
         _ => Err(anyhow::anyhow!("Worker 不支持的后端: {}", backend)),
